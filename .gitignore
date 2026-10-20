@@ -1,0 +1,36 @@
+# Environment variables & Secrets (Bảo mật API Key)
+.env
+.env.local
+*.env
+ai-service/.env
+
+# Python AI Service
+venv/
+env/
+__pycache__/
+*.py[cod]
+ai-service/venv/
+ai-service/**/__pycache__/
+
+# Node.js & React Frontend
+node_modules/
+frontend/node_modules/
+dist/
+frontend/dist/
+*.log
+
+# Java & Spring Boot Backend
+target/
+backend/target/
+*.class
+*.jar
+*.war
+backend/uploads/invoices/*
+!backend/uploads/invoices/.gitkeep
+
+# IDEs & OS files
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db

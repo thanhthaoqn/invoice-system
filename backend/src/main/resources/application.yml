@@ -1,0 +1,28 @@
+server:
+  port: 8088
+
+spring:
+  application:
+    name: smart-expense-reimbursement
+  datasource:
+    url: jdbc:postgresql://localhost:5432/expense_audit
+    username: postgres
+    password: postgres
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: true
+  servlet:
+    multipart:
+      max-file-size: 25MB
+      max-request-size: 25MB
+
+app:
+  ai-service:
+    url: http://127.0.0.1:8000/api/extract
+  storage:
+    upload-dir: uploads/invoices
