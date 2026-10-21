@@ -18,22 +18,19 @@ if (-not $pgRunning) {
 
 # 1. Khởi động Python AI Microservice (Port 8000)
 Write-Host "[1/3] Khởi chạy Python AI Extraction Microservice (Port 8000)..." -ForegroundColor Magenta
-$pythonExe = Join-Path $baseDir "ai-service\venv\Scripts\python.exe"
-if (-Not (Test-Path $pythonExe)) {
-    $pythonExe = "python"
-}
 $aiDir = Join-Path $baseDir "ai-service"
-Start-Process powershell.exe -ArgumentList "-NoExit", "-Command", "Set-Location -LiteralPath '$aiDir'; & '$pythonExe' -m uvicorn app.main:app --host 127.0.0.1 --port 8000"
+$pyCmd = "if (Test-Path '.\venv\Scripts\python.exe') { & '.\venv\Scripts\python.exe' -m uvicorn app.main:app --host 127.0.0.1 --port 8000 } else { python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 }"
+Start-Process powershell.exe -WorkingDirectory $aiDir -ArgumentList "-NoExit", "-Command", "`$Host.UI.RawUI.WindowTitle = 'AI Microservice (Port 8000)'; $pyCmd"
 
 # 2. Khởi động Java Spring Boot Backend (Port 8088)
 Write-Host "[2/3] Khởi chạy Java Spring Boot Backend (Port 8088)..." -ForegroundColor Cyan
 $backendDir = Join-Path $baseDir "backend"
-Start-Process powershell.exe -ArgumentList "-NoExit", "-Command", "Set-Location -LiteralPath '$backendDir'; mvn spring-boot:run"
+Start-Process powershell.exe -WorkingDirectory $backendDir -ArgumentList "-NoExit", "-Command", "`$Host.UI.RawUI.WindowTitle = 'Spring Boot Backend (Port 8088)'; mvn spring-boot:run"
 
 # 3. Khởi động React Vite Frontend (Port 5173)
 Write-Host "[3/3] Khởi chạy React 18 Frontend Web App (Port 5173)..." -ForegroundColor Green
 $frontendDir = Join-Path $baseDir "frontend"
-Start-Process powershell.exe -ArgumentList "-NoExit", "-Command", "Set-Location -LiteralPath '$frontendDir'; npm run dev -- --host 127.0.0.1 --port 5173"
+Start-Process powershell.exe -WorkingDirectory $frontendDir -ArgumentList "-NoExit", "-Command", "`$Host.UI.RawUI.WindowTitle = 'React Frontend (Port 5173)'; npm run dev -- --host 127.0.0.1 --port 5173"
 
 Write-Host "----------------------------------------------------------" -ForegroundColor Gray
 Write-Host "Tất cả các dịch vụ đang chạy:" -ForegroundColor White
