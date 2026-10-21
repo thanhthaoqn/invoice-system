@@ -20,19 +20,19 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({ invoice }) => {
   const fileUrl = invoice.fileUrl || `/api/invoices/${invoice.id}/file`;
 
   return (
-    <div className="h-full flex flex-col bg-slate-950 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl">
+    <div className="h-full flex flex-col bg-white border border-slate-200/90 rounded-2xl overflow-hidden shadow-sm">
       {/* Viewer Toolbar */}
-      <div className="p-3 bg-slate-900 border-b border-slate-800 flex items-center justify-between">
+      <div className="p-3 bg-slate-50/90 border-b border-slate-200 flex items-center justify-between">
         <div className="flex items-center space-x-2">
           {isPdf ? (
-            <FileText className="w-4 h-4 text-rose-400" />
+            <FileText className="w-4 h-4 text-rose-500" />
           ) : (
-            <ImageIcon className="w-4 h-4 text-cyan-400" />
+            <ImageIcon className="w-4 h-4 text-cyan-600" />
           )}
-          <span className="text-xs font-semibold text-slate-200 truncate max-w-[200px]" title={invoice.fileName}>
+          <span className="text-xs font-bold text-slate-800 truncate max-w-[200px]" title={invoice.fileName}>
             {invoice.fileName}
           </span>
-          <span className="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-400 font-mono">
+          <span className="text-[10px] px-2 py-0.5 rounded bg-slate-200/80 text-slate-600 font-mono font-semibold">
             {invoice.fileType}
           </span>
         </div>
@@ -41,31 +41,31 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({ invoice }) => {
         <div className="flex items-center space-x-1">
           <button
             onClick={handleZoomOut}
-            className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition"
+            className="p-1.5 rounded-lg bg-white hover:bg-slate-100 border border-slate-200 text-slate-600 hover:text-slate-900 transition shadow-xs"
             title="Thu nhỏ (-)"
           >
             <ZoomOut className="w-3.5 h-3.5" />
           </button>
-          <span className="text-[11px] font-mono text-slate-400 px-1.5">
+          <span className="text-[11px] font-mono text-slate-600 font-semibold px-1.5">
             {Math.round(zoom * 100)}%
           </span>
           <button
             onClick={handleZoomIn}
-            className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition"
+            className="p-1.5 rounded-lg bg-white hover:bg-slate-100 border border-slate-200 text-slate-600 hover:text-slate-900 transition shadow-xs"
             title="Phóng to (+)"
           >
             <ZoomIn className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={handleRotate}
-            className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition ml-1"
+            className="p-1.5 rounded-lg bg-white hover:bg-slate-100 border border-slate-200 text-slate-600 hover:text-slate-900 transition ml-1 shadow-xs"
             title="Xoay 90°"
           >
             <RotateCw className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={handleReset}
-            className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] text-slate-300 hover:text-white transition"
+            className="px-2 py-1 rounded-lg bg-white hover:bg-slate-100 border border-slate-200 text-[11px] font-medium text-slate-600 hover:text-slate-900 transition shadow-xs"
             title="Mặc định"
           >
             Đặt lại
@@ -75,7 +75,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({ invoice }) => {
             target="_blank"
             rel="noreferrer"
             download={invoice.fileName}
-            className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition ml-2"
+            className="p-1.5 rounded-lg bg-white hover:bg-slate-100 border border-slate-200 text-slate-600 hover:text-slate-900 transition ml-2 shadow-xs"
             title="Tải file gốc"
           >
             <Download className="w-3.5 h-3.5" />
@@ -84,7 +84,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({ invoice }) => {
       </div>
 
       {/* Document Viewport */}
-      <div className="flex-1 overflow-auto p-4 flex items-center justify-center bg-slate-900/50 relative">
+      <div className="flex-1 overflow-auto p-4 flex items-center justify-center bg-slate-100/90 relative">
         {hasError ? (
           /* High-Fidelity Synthetic Invoice Document Render when raw binary preview is unavailable or demo */
           <div
@@ -93,7 +93,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({ invoice }) => {
               transformOrigin: 'center center',
               transition: 'transform 0.15s ease-out'
             }}
-            className="w-full max-w-md bg-white text-slate-900 p-6 rounded-lg shadow-2xl border border-slate-200 font-sans text-xs select-none"
+            className="w-full max-w-md bg-white text-slate-900 p-6 rounded-lg shadow-xl border border-slate-300 font-sans text-xs select-none"
           >
             <div className="border-b-2 border-red-600 pb-3 mb-3 flex justify-between items-start">
               <div>
@@ -199,11 +199,11 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({ invoice }) => {
         )}
       </div>
 
-      <div className="p-2.5 bg-slate-900/90 border-t border-slate-800 text-[11px] text-slate-400 flex items-center justify-between px-4">
+      <div className="p-2.5 bg-slate-50 border-t border-slate-200 text-[11px] text-slate-500 flex items-center justify-between px-4">
         <span>Cửa sổ kiểm chứng chứng từ gốc (Human-In-The-Loop)</span>
         <button
           onClick={() => setHasError((prev) => !prev)}
-          className="text-xs text-indigo-400 hover:text-indigo-300 transition"
+          className="text-xs text-indigo-600 hover:text-indigo-700 font-semibold transition"
         >
           {hasError ? 'Thử tải lại file gốc' : 'Xem dạng bản in chuẩn'}
         </button>

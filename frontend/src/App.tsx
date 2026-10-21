@@ -52,7 +52,7 @@ export const App: React.FC = () => {
   const pendingCount = invoices.filter((i) => i.status === 'PENDING_REVIEW').length;
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
+    <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col selection:bg-indigo-600 selection:text-white">
       <Navbar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
@@ -79,10 +79,10 @@ export const App: React.FC = () => {
             />
           ) : (
             <div className="text-center py-24 space-y-4">
-              <p className="text-slate-400">Chưa chọn hóa đơn nào để đối soát.</p>
+              <p className="text-slate-500 font-medium">Chưa chọn hóa đơn nào để đối soát.</p>
               <button
                 onClick={() => setActiveTab('upload')}
-                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 rounded-lg text-sm font-bold text-white transition"
+                className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 rounded-xl text-sm font-bold text-white shadow-md shadow-indigo-600/20 transition-all hover:scale-[1.02]"
               >
                 Tải lên hoặc chọn hóa đơn
               </button>
