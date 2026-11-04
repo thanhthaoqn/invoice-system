@@ -13,6 +13,13 @@ import java.util.List;
 @AllArgsConstructor
 @Builder
 public class AiExtractionDto {
+    @JsonProperty("invoice_template") private String invoiceTemplate;
+    @JsonProperty("invoice_series") private String invoiceSeries;
+    @JsonProperty("seller_address") private String sellerAddress;
+    @JsonProperty("buyer_name") private String buyerName;
+    @JsonProperty("buyer_tax_code") private String buyerTaxCode;
+    @JsonProperty("buyer_address") private String buyerAddress;
+    private String currency;
 
     @JsonProperty("invoice_number")
     private String invoiceNumber;

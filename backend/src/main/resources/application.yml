@@ -37,6 +37,7 @@ app:
     max-expanded-bytes: 52428800
     max-compression-ratio: 100
     max-attempts: 3
+    max-pdf-pages: 20
   ai-service:
     url: http://127.0.0.1:8000/api/extract
   storage:

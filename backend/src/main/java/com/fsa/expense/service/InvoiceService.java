@@ -176,7 +176,7 @@ public class InvoiceService {
             }
         }
 
-        String reviewer = request.getReviewedBy() != null ? request.getReviewedBy() : "Kế toán viên";
+        String reviewer = com.fsa.expense.auth.TenantContext.username();
         String reason = request.getReason() != null ? request.getReason() : "Chỉnh sửa đối soát Human-In-The-Loop";
 
         // Log field-level discrepancies if original AI values differ from human input
@@ -293,6 +293,8 @@ public class InvoiceService {
                 .id(invoice.getId())
                 .validationState(invoice.getValidationState())
                 .buyerTaxCode(invoice.getBuyerTaxCode())
+                .buyerName(invoice.getBuyerName()).sellerAddress(invoice.getSellerAddress()).buyerAddress(invoice.getBuyerAddress())
+                .currency(invoice.getCurrency()).source(invoice.getSource())
                 .invoiceTemplate(invoice.getInvoiceTemplate())
                 .invoiceSeries(invoice.getInvoiceSeries())
                 .invoiceNumber(invoice.getInvoiceNumber())

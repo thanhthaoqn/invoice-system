@@ -18,6 +18,11 @@ public class InvoiceResponseDto {
     private Long id;
     private String validationState;
     private String buyerTaxCode;
+    private String buyerName;
+    private String sellerAddress;
+    private String buyerAddress;
+    private String currency;
+    private String source;
     private String invoiceTemplate;
     private String invoiceSeries;
     private String invoiceNumber;

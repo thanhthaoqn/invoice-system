@@ -40,6 +40,7 @@ class IntakeIntegrationTest {
     @Autowired org.springframework.jdbc.core.JdbcTemplate jdbc;
     @SpyBean com.fsa.expense.service.FileStorageService storage;
     @SpyBean com.fsa.expense.service.AuditValidationService audit;
+    @SpyBean com.fsa.expense.service.AiExtractionClient extraction;
     static final String PASSWORD="a-long-test-password";
     static final Path STORAGE;
     static { try { STORAGE=Files.createTempDirectory("smart-expense-intake-test-"); } catch(IOException e) { throw new ExceptionInInitializerError(e); } }
@@ -149,7 +150,8 @@ class IntakeIntegrationTest {
         Login login=login();
         assertThat(upload(login,"renamed.zip","not a zip".getBytes()).at("/items/0/state").asText()).isEqualTo("INVALID_ARCHIVE");
         assertThat(upload(login,"renamed.xml","%PDF-1.7".getBytes()).at("/items/0/state").asText()).isEqualTo("PARSE_FAILED");
-        assertThat(upload(login,"photo.pdf","%PDF-1.7".getBytes()).at("/items/0/state").asText()).isEqualTo("UNSUPPORTED");
+        org.mockito.Mockito.doThrow(new IllegalStateException("PDF hỏng")).when(extraction).extractInvoice(org.mockito.ArgumentMatchers.any());
+        assertThat(upload(login,"photo.pdf","%PDF-1.7".getBytes()).at("/items/0/state").asText()).isEqualTo("OCR_FAILED");
         assertThatThrownBy(() -> parser.parse("<!DOCTYPE x [<!ENTITY x SYSTEM 'file:///etc/passwd'>]><HDon>&x;</HDon>".getBytes())).isInstanceOf(IllegalArgumentException.class);
     }
     @Test void tenFailuresBlockUntilWindowExpiresAndLockedAccountsNeverGetSession() throws Exception {
@@ -221,5 +223,61 @@ class IntakeIntegrationTest {
         JsonNode result=upload(login,"directory.zip",zip(new String[]{"directory/","one.xml"},new byte[][]{payload,xml("1","0300000001",a.getTaxCode())}));
         assertThat(result.at("/items/0/state").asText()).isEqualTo("ARCHIVE_FAILED");
         assertThat(jdbc.queryForObject("select count(*) from invoices",Long.class)).isZero();
+    }
+    com.fsa.expense.dto.AiExtractionDto pdfData() {
+        return com.fsa.expense.dto.AiExtractionDto.builder().invoiceNumber("00099").invoiceDate("2026-11-04")
+            .invoiceTemplate("1").invoiceSeries("C26TAA").vendorName("PDF Supplier").taxCode("0300000001")
+            .buyerName("Buyer A").buyerTaxCode(a.getTaxCode()).sellerAddress("Seller street").buyerAddress("Buyer street").currency("VND")
+            .subtotalAmount(new java.math.BigDecimal("100000")).vatAmount(new java.math.BigDecimal("10000")).totalAmount(new java.math.BigDecimal("110000"))
+            .extractionMethod("PYMUPDF_VECTOR_TEXT").build();
+    }
+    JsonNode draft(Login login,long id) throws Exception {
+        return json.readTree(mvc.perform(get("/api/intake/items/"+id+"/draft").session(login.session())).andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
+    }
+    @Test void pdfPersistsDraftThenConfirmsOnceWithSameFieldsAsXml() throws Exception {
+        Login login=login(); org.mockito.Mockito.doReturn(pdfData()).when(extraction).extractInvoice(org.mockito.ArgumentMatchers.any());
+        JsonNode result=upload(login,"invoice.pdf","%PDF-1.7 test fixture".getBytes());
+        long id=result.at("/items/0/id").asLong();
+        assertThat(result.at("/items/0/state").asText()).isEqualTo("OCR_REVIEW");
+        assertThat(result.at("/counts/pdfDocuments").asInt()).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select count(*) from invoices",Long.class)).isZero();
+        JsonNode repeat=upload(login,"invoice.pdf","%PDF-1.7 test fixture".getBytes());
+        assertThat(repeat.at("/items/0/originalItemId").asLong()).isEqualTo(id);
+        JsonNode data=draft(login,id);
+        assertThat(data.at("/data/buyer_name").asText()).isEqualTo("Buyer A");
+        long invoiceId=0;
+        for(int n=0;n<2;n++) {
+            var response=mvc.perform(post("/api/intake/items/"+id+"/confirm").session(login.session()).header("X-CSRF-Token",login.csrf()).contentType("application/json").content(data.toString()))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.state").value("INGESTED")).andReturn();
+            invoiceId=json.readTree(response.getResponse().getContentAsString()).path("invoiceId").asLong();
+        }
+        assertThat(jdbc.queryForObject("select count(*) from invoices",Long.class)).isEqualTo(1);
+        mvc.perform(get("/api/invoices/"+invoiceId).session(login.session())).andExpect(status().isOk())
+            .andExpect(jsonPath("$.source").value("OCR_CONFIRMED")).andExpect(jsonPath("$.buyerName").value("Buyer A"))
+            .andExpect(jsonPath("$.invoiceTemplate").value("1")).andExpect(jsonPath("$.fileType").value("PDF"))
+            .andExpect(jsonPath("$.status").value("PENDING_REVIEW"));
+        mvc.perform(get("/api/intake/items/"+id+"/file").session(login.session())).andExpect(status().isOk()).andExpect(content().contentType("application/pdf"));
+    }
+    @Test void pdfDraftVersionConflictAndRequiredFieldsAreChecked() throws Exception {
+        Login login=login(); var extracted=pdfData(); extracted.setInvoiceNumber(null);
+        org.mockito.Mockito.doReturn(extracted).when(extraction).extractInvoice(org.mockito.ArgumentMatchers.any());
+        long id=upload(login,"incomplete.pdf","%PDF-1.7 incomplete".getBytes()).at("/items/0/id").asLong();
+        JsonNode data=draft(login,id);
+        mvc.perform(post("/api/intake/items/"+id+"/confirm").session(login.session()).header("X-CSRF-Token",login.csrf()).contentType("application/json").content(data.toString())).andExpect(status().isBadRequest());
+        ((com.fasterxml.jackson.databind.node.ObjectNode)data.path("data")).put("invoice_number","00100");
+        mvc.perform(put("/api/intake/items/"+id+"/draft").session(login.session()).header("X-CSRF-Token",login.csrf()).contentType("application/json").content(data.toString())).andExpect(status().isOk());
+        mvc.perform(put("/api/intake/items/"+id+"/draft").session(login.session()).header("X-CSRF-Token",login.csrf()).contentType("application/json").content(data.toString())).andExpect(status().isConflict());
+        assertThat(jdbc.queryForObject("select count(*) from invoices",Long.class)).isZero();
+    }
+    @Test void pdfAndXmlIdentityDedupAndCrossTenantProtection() throws Exception {
+        Login login=login(); org.mockito.Mockito.doReturn(pdfData()).when(extraction).extractInvoice(org.mockito.ArgumentMatchers.any());
+        JsonNode imported=upload(login,"original.xml",xml("00099","0300000001",a.getTaxCode()));
+        long id=upload(login,"representation.pdf","%PDF-1.7 representation".getBytes()).at("/items/0/id").asLong();
+        JsonNode data=draft(login,id);
+        mvc.perform(post("/api/intake/items/"+id+"/confirm").session(login.session()).header("X-CSRF-Token",login.csrf()).contentType("application/json").content(data.toString()))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.state").value("DUPLICATE_IDENTITY")).andExpect(jsonPath("$.invoiceId").value(imported.at("/items/0/invoiceId").asInt()));
+        member(b,true); login.session().setAttribute("tenantId",b.getId());
+        mvc.perform(get("/api/intake/items/"+id+"/draft").session(login.session())).andExpect(status().isNotFound());
+        mvc.perform(post("/api/intake/items/"+id+"/confirm").session(login.session()).header("X-CSRF-Token",login.csrf()).contentType("application/json").content(data.toString())).andExpect(status().isNotFound());
     }
 }

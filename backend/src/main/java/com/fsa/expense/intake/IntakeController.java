@@ -15,8 +15,26 @@ public class IntakeController {
     private final IntakeItemRepository items;
     private final IntakeAttemptRepository attempts;
     private final FileStorageService storage;
-    public IntakeController(IntakeService service, IntakeLimits limits, IntakeItemRepository items, IntakeAttemptRepository attempts, FileStorageService storage) {
+    private final IntakeProcessor processor;
+    private final com.fasterxml.jackson.databind.ObjectMapper json;
+    public IntakeController(IntakeService service, IntakeLimits limits, IntakeItemRepository items, IntakeAttemptRepository attempts, FileStorageService storage,IntakeProcessor processor,com.fasterxml.jackson.databind.ObjectMapper json) {
         this.service=service; this.limits=limits; this.items=items; this.attempts=attempts; this.storage=storage;
+        this.processor=processor; this.json=json;
+    }
+    public record PdfDraft(long version,com.fsa.expense.dto.AiExtractionDto data) {}
+    @GetMapping("/items/{id}/draft") public PdfDraft draft(@PathVariable Long id) throws com.fasterxml.jackson.core.JsonProcessingException {
+        IntakeItem item=item(id);
+        if (!"PDF".equals(item.getDocumentType()) || item.getDraftJson()==null) throw AuthService.error(409,"Chưa có dữ liệu trích xuất PDF");
+        return new PdfDraft(item.getVersion(),json.readValue(item.getDraftJson(),com.fsa.expense.dto.AiExtractionDto.class));
+    }
+    @PutMapping("/items/{id}/draft") public PdfDraft saveDraft(@PathVariable Long id,@RequestBody PdfDraft draft) throws com.fasterxml.jackson.core.JsonProcessingException {
+        if(draft.data()==null) throw new IllegalArgumentException("Thiếu dữ liệu PDF");
+        processor.savePdf(id,draft.version(),draft.data(),false);
+        return draft(id);
+    }
+    @PostMapping("/items/{id}/confirm") public IntakeItem confirm(@PathVariable Long id,@RequestBody PdfDraft draft) {
+        if(draft.data()==null) throw new IllegalArgumentException("Thiếu dữ liệu PDF");
+        return processor.savePdf(id,draft.version(),draft.data(),true);
     }
     @GetMapping("/limits") public IntakeLimits limits() { return limits; }
     @GetMapping("/sessions") public List<IntakeService.SessionResult> history() { return service.history(); }
@@ -31,8 +49,10 @@ public class IntakeController {
     @GetMapping("/items/{id}/file") public ResponseEntity<Resource> file(@PathVariable Long id) {
         IntakeItem item=item(id);
         if (item.getStoragePath()==null) throw AuthService.error(404, "Chưa có tài liệu gốc được lưu");
-        return ResponseEntity.ok().contentType(MediaType.APPLICATION_OCTET_STREAM)
-            .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment().filename("document-"+id+".bin").build().toString())
+        boolean pdf="PDF".equals(item.getDocumentType());
+        return ResponseEntity.ok().contentType(pdf ? MediaType.APPLICATION_PDF : MediaType.APPLICATION_OCTET_STREAM)
+            .header("X-Content-Type-Options","nosniff")
+            .header(HttpHeaders.CONTENT_DISPOSITION, (pdf ? ContentDisposition.inline() : ContentDisposition.attachment()).filename("document-"+id+(pdf ? ".pdf" : ".bin")).build().toString())
             .body(storage.loadFileAsResource(item.getStoragePath()));
     }
     private IntakeItem item(Long id) { return items.findByIdAndTenantId(id, TenantContext.id()).orElseThrow(() -> AuthService.error(404, "Không tìm thấy tài liệu")); }

@@ -13,13 +13,20 @@ class ExpenseCategoryEnum(str, Enum):
 
 class LineItemSchema(BaseModel):
     item_name: str = Field(..., description="Tên mặt hàng, dịch vụ hoặc vé")
-    quantity: float = Field(default=1.0, description="Số lượng")
-    unit_price: float = Field(default=0.0, description="Đơn giá")
-    amount: float = Field(..., description="Thành tiền trước thuế của mặt hàng")
-    vat_rate: Optional[str] = Field(default="10%", description="Thuế suất GTGT (VD: '8%', '10%', '0%', 'KCT')")
+    quantity: Optional[float] = Field(default=None, description="Số lượng")
+    unit_price: Optional[float] = Field(default=None, description="Đơn giá")
+    amount: Optional[float] = Field(default=None, description="Thành tiền trước thuế của mặt hàng")
+    vat_rate: Optional[str] = Field(default=None, description="Thuế suất GTGT")
 
 
 class InvoiceExtractionResponse(BaseModel):
+    invoice_template: Optional[str] = None
+    invoice_series: Optional[str] = None
+    seller_address: Optional[str] = None
+    buyer_name: Optional[str] = None
+    buyer_tax_code: Optional[str] = None
+    buyer_address: Optional[str] = None
+    currency: Optional[str] = None
     invoice_number: Optional[str] = Field(None, description="Số hóa đơn (VD: '001289', 'HD-2024-001')")
     invoice_date: Optional[str] = Field(None, description="Ngày lập hóa đơn định dạng YYYY-MM-DD")
     vendor_name: Optional[str] = Field(None, description="Tên đơn vị bán lẻ, nhà cung cấp, hoặc đối tác")
@@ -29,7 +36,7 @@ class InvoiceExtractionResponse(BaseModel):
     vat_amount: Optional[float] = Field(None, description="Tổng tiền thuế GTGT (VAT)")
     total_amount: Optional[float] = Field(None, description="Tổng tiền thanh toán bằng số")
     category: ExpenseCategoryEnum = Field(default=ExpenseCategoryEnum.SERVICES, description="Danh mục chi phí tự động phân loại")
-    confidence_score: float = Field(default=0.9, ge=0.0, le=1.0, description="Độ tin cậy trích xuất AI (0.0 đến 1.0)")
+    confidence_score: Optional[float] = Field(default=None, ge=0.0, le=1.0, description="Độ tin cậy nếu engine cung cấp")
     notes: Optional[str] = Field(default=None, description="Ghi chú thêm hoặc lưu ý từ AI")
     raw_text: Optional[str] = Field(default=None, description="Văn bản tóm tắt trích xuất")
     extraction_method: Optional[str] = Field(default="VLM_GEMINI_VISION", description="Phương thức bóc tách: PYMUPDF_VECTOR_TEXT hoặc VLM_GEMINI_VISION")

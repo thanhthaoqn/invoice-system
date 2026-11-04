@@ -361,6 +361,13 @@ export const SplitScreenReview: React.FC<SplitScreenReviewProps> = ({
 
           {/* Form Scrollable Body */}
           <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4">
+            <section className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs space-y-2">
+              <div className="flex flex-wrap gap-4"><span>Mẫu số: <strong>{invoice.invoiceTemplate || 'Chưa xác định'}</strong></span><span>Ký hiệu: <strong>{invoice.invoiceSeries || 'Chưa xác định'}</strong></span><span>Tiền tệ: <strong>{invoice.currency || 'Chưa xác định'}</strong></span></div>
+              {invoice.sellerAddress && <p>Địa chỉ bên bán: {invoice.sellerAddress}</p>}
+              <p>Bên mua: <strong>{invoice.buyerName || 'Chưa xác định'}</strong> · MST: <strong>{invoice.buyerTaxCode || 'Chưa xác định'}</strong></p>
+              {invoice.buyerAddress && <p>Địa chỉ bên mua: {invoice.buyerAddress}</p>}
+              {invoice.source === 'OCR_CONFIRMED' && <p className="text-indigo-700">Nguồn: PDF đã xác nhận dữ liệu. Chưa xác minh chữ ký điện tử.</p>}
+            </section>
             {/* Primary Fields Grid */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
               <div>

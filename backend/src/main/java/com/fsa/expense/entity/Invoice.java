@@ -27,6 +27,11 @@ public class Invoice {
     private String invoiceSeries;
     private String identityKey;
     private String buyerTaxCode;
+    private String buyerName;
+    @Column(length=1000) private String sellerAddress;
+    @Column(length=1000) private String buyerAddress;
+    private String currency;
+    private String source;
     private String validationState;
 
     @Id

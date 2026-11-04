@@ -1,5 +1,8 @@
 # Sprint 1: login và tiếp nhận XML/ZIP
 
+Đã bổ sung [scan PDF, kiểm tra dữ liệu và xác nhận hóa đơn](docs/pdf-intake.md),
+cùng bộ trường với XML; hỗ trợ PDF có chữ và PDF scan qua dịch vụ OCR.
+
 Luồng upload mới yêu cầu đăng nhập và chọn doanh nghiệp. Xem
 [hướng dẫn khởi chạy, cấp tài khoản và các thay đổi Sprint 1](docs/sprint-1-smart-expense.md)
 trước khi dùng. Các mô tả OCR/demo cũ bên dưới không phải luồng XML/ZIP mới.

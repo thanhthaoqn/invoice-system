@@ -1,5 +1,9 @@
 # Sprint 1 — SmartExpense
 
+Update 2026-11-04: PDF extraction/review/confirmation has been added after Sprint 1.
+See [PDF intake](pdf-intake.md) for usage and configuration; the scope/limits below
+describe the original Sprint 1 delivery.
+
 Implemented scope: login, company selection, XML/ZIP intake, per-document outcomes,
 durable history and bounded retries. OCR/email remain outside this sprint.
 

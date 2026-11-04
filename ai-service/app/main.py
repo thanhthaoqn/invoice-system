@@ -1,8 +1,12 @@
 import logging
-from fastapi import FastAPI, UploadFile, File, HTTPException
+import os
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from app.schemas import InvoiceExtractionResponse
 from app.invoice_processor import InvoiceProcessor
+from app.pdf_extraction import extract_pdf, PdfExtractionError
+from starlette.concurrency import run_in_threadpool
+from pydantic import ValidationError
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ai_service")
@@ -40,7 +44,7 @@ def health_check():
 
 
 @app.post("/api/extract", response_model=InvoiceExtractionResponse)
-async def extract_invoice(file: UploadFile = File(...)):
+async def extract_invoice(file: UploadFile = File(...), max_pages: int = Form(20)):
     """
     Quy trình bóc tách hóa đơn 4 tầng kỹ thuật:
     1. Input Router kiểm tra text layer trong PDF (PyMuPDF).
@@ -56,9 +60,20 @@ async def extract_invoice(file: UploadFile = File(...)):
 
     logger.info(f"Processing invoice file: {filename} ({mime_type})")
 
-    file_bytes = await file.read()
+    file_bytes = await file.read(15 * 1024 * 1024 + 1)
+    if len(file_bytes) > 15 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="PDF vượt giới hạn 15 MiB")
     if len(file_bytes) == 0:
         raise HTTPException(status_code=400, detail="File rỗng")
+
+    if filename.lower().endswith('.pdf') or mime_type == 'application/pdf':
+        try:
+            data = await run_in_threadpool(extract_pdf, file_bytes, min(max_pages, int(os.getenv('PDF_MAX_PAGES', '20'))))
+            return InvoiceExtractionResponse(**data)
+        except PdfExtractionError as error:
+            raise HTTPException(status_code=error.status, detail=str(error)) from None
+        except (ValidationError, TypeError):
+            raise HTTPException(status_code=422, detail="Dịch vụ OCR trả dữ liệu chưa đúng cấu trúc; vui lòng thử lại") from None
 
     extraction_result = InvoiceProcessor.process_invoice(
         file_bytes=file_bytes,

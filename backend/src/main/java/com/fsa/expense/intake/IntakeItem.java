@@ -15,8 +15,14 @@ public class IntakeItem {
     private String contentHash;
     private long fileSize;
     private boolean xmlDocument;
+    private String documentType;
+    @JsonIgnore @Column(columnDefinition="TEXT") private String rawExtraction;
+    @JsonIgnore @Column(columnDefinition="TEXT") private String draftJson;
+    @JsonIgnore @Column(columnDefinition="TEXT") private String confirmedSnapshot;
+    private String confirmedBy;
+    private Instant confirmedAt;
     public boolean isRetryable() {
-        return "PARSE_FAILED".equals(state) || "PROCESSING_FAILED".equals(state)
+        return "PARSE_FAILED".equals(state) || "PROCESSING_FAILED".equals(state) || "OCR_FAILED".equals(state)
             || ("RECEIVED".equals(state) && updatedAt.isBefore(Instant.now().minusSeconds(300)));
     }
     private String state = "RECEIVED";

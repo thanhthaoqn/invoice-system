@@ -13,4 +13,5 @@ public class IntakeLimits {
     private long maxExpandedBytes = 50 * 1024 * 1024;
     private int maxCompressionRatio = 100;
     private int maxAttempts = 3;
+    private int maxPdfPages = 20;
 }

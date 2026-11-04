@@ -22,13 +22,14 @@ public class AiExtractionClient {
 
     @Value("${app.ai-service.url:http://127.0.0.1:8000/api/extract}")
     private String aiServiceUrl;
+    @Value("${app.intake.max-pdf-pages:20}") private int maxPdfPages;
 
     private final RestClient restClient;
 
     public AiExtractionClient() {
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout(10000);
-        requestFactory.setReadTimeout(60000);
+        requestFactory.setReadTimeout(90000);
         this.restClient = RestClient.builder()
                 .requestFactory(requestFactory)
                 .build();
@@ -44,6 +45,7 @@ public class AiExtractionClient {
                 }
             };
             body.add("file", fileResource);
+            body.add("max_pages", String.valueOf(maxPdfPages));
 
             log.info("Sending invoice file to AI microservice at {}", aiServiceUrl);
             AiExtractionDto response = restClient.post()
@@ -57,59 +59,15 @@ public class AiExtractionClient {
                 log.info("AI extraction succeeded for invoice: {}", response.getInvoiceNumber());
                 return response;
             }
+        } catch (org.springframework.web.client.RestClientResponseException e) {
+            try {
+                String message=new com.fasterxml.jackson.databind.ObjectMapper().readTree(e.getResponseBodyAsString()).path("detail").asText();
+                if (!message.isBlank() && message.length()<500) throw new IllegalArgumentException(message);
+            } catch (java.io.IOException ignored) { }
+            throw new IllegalStateException("Dịch vụ trích xuất PDF chưa khả dụng; vui lòng thử lại", e);
         } catch (Exception e) {
-            log.error("Failed to call AI microservice: {}. Using local fallback extraction.", e.getMessage());
+            throw new IllegalStateException("Không kết nối được dịch vụ trích xuất PDF; vui lòng thử lại", e);
         }
-
-        return createFallbackExtraction(file.getOriginalFilename());
-    }
-
-    private AiExtractionDto createFallbackExtraction(String originalFilename) {
-        String filename = originalFilename != null ? originalFilename.toLowerCase() : "";
-        if (filename.contains("air") || filename.contains("bay") || filename.contains("travel")) {
-            return AiExtractionDto.builder()
-                    .invoiceNumber("VN-2024-08912")
-                    .invoiceDate("2024-05-12")
-                    .vendorName("CÔNG TY CỔ PHẦN HÀNG KHÔNG VIETNAM AIRLINES")
-                    .taxCode("0100107518")
-                    .category("Chi phí Công tác")
-                    .subtotalAmount(BigDecimal.valueOf(3500000.00))
-                    .vatAmount(BigDecimal.valueOf(350000.00))
-                    .totalAmount(BigDecimal.valueOf(3850000.00))
-                    .confidenceScore(0.95)
-                    .notes("Hóa đơn điện tử vé máy bay khứ hồi (AI Simulation)")
-                    .lineItems(Collections.singletonList(
-                            AiExtractionDto.AiLineItemDto.builder()
-                                    .itemName("Vé máy bay Hà Nội - TP.HCM")
-                                    .quantity(BigDecimal.ONE)
-                                    .unitPrice(BigDecimal.valueOf(3500000.00))
-                                    .amount(BigDecimal.valueOf(3500000.00))
-                                    .vatRate("10%")
-                                    .build()
-                    ))
-                    .build();
-        }
-
-        return AiExtractionDto.builder()
-                .invoiceNumber("HD-" + System.currentTimeMillis() % 100000)
-                .invoiceDate(java.time.LocalDate.now().toString())
-                .vendorName("CÔNG TY CỔ PHẦN BÁN LẺ KỸ THUẬT SỐ FPT")
-                .taxCode("0311609355")
-                .category("Mua sắm Vật tư / Thiết bị")
-                .subtotalAmount(BigDecimal.valueOf(2500000.00))
-                .vatAmount(BigDecimal.valueOf(250000.00))
-                .totalAmount(BigDecimal.valueOf(2750000.00))
-                .confidenceScore(0.92)
-                .notes("Hóa đơn thiết bị văn phòng (AI Simulation)")
-                .lineItems(Collections.singletonList(
-                        AiExtractionDto.AiLineItemDto.builder()
-                                .itemName("Bàn phím cơ & Chuột không dây")
-                                .quantity(BigDecimal.ONE)
-                                .unitPrice(BigDecimal.valueOf(2500000.00))
-                                .amount(BigDecimal.valueOf(2500000.00))
-                                .vatRate("10%")
-                                .build()
-                ))
-                .build();
+        throw new IllegalStateException("Dịch vụ không trả dữ liệu PDF hợp lệ");
     }
 }

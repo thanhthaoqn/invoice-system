@@ -45,10 +45,10 @@ public class IntakeService {
                 catch (IOException e) { record(session, name, null, false, "STORAGE_FAILED", "Không đọc được file tải lên"); continue; }
                 String lower=name.toLowerCase(Locale.ROOT);
                 if (lower.endsWith(".zip")) unpack(session, name, bytes, budget);
-                else if (lower.endsWith(".xml")) {
-                    IntakeItem item = record(session, name, bytes, true, "RECEIVED", "Đã lưu bản gốc");
+                else if (lower.endsWith(".xml") || lower.endsWith(".pdf")) {
+                    IntakeItem item = record(session, name, bytes, lower.endsWith(".xml"), "RECEIVED", "Đã lưu bản gốc");
                     process(item);
-                } else record(session, name, bytes, false, "UNSUPPORTED", "Chỉ nhận XML/ZIP. PDF/ảnh sẽ được hỗ trợ trong luồng OCR sau.");
+                } else record(session, name, bytes, false, "UNSUPPORTED", "Chỉ nhận XML, PDF hoặc ZIP");
             }
             session.setState("COMPLETED");
         } catch (RuntimeException e) {
@@ -83,15 +83,15 @@ public class IntakeService {
                 long compressed=entry.getCompressedSize();
                 if (size > Math.max(1L, compressed) * limits.getMaxCompressionRatio()) throw new IllegalArgumentException("Entry vượt tỉ lệ nén cho phép");
                 if (entry.isDirectory()) continue;
-                if (xml) {
+                if (xml || path.toLowerCase(Locale.ROOT).endsWith(".pdf")) {
                     xmlCount++;
-                    process(record(session, name+"/"+path, output.toByteArray(), true, "RECEIVED", "Đã lưu XML từ ZIP"));
+                    process(record(session, name+"/"+path, output.toByteArray(), xml, "RECEIVED", "Đã lưu tài liệu từ ZIP"));
                 } else if (path.toLowerCase(Locale.ROOT).endsWith(".zip")) {
                     record(session, name+"/"+path, null, false, "UNSUPPORTED", "Không hỗ trợ ZIP lồng nhau; bản gốc nằm trong ZIP đã lưu");
                 }
             }
             archive.setState(xmlCount == 0 ? "ARCHIVE_EMPTY" : "ARCHIVE_PROCESSED");
-            archive.setMessage(xmlCount == 0 ? "ZIP không chứa XML phù hợp" : "Đã đọc " + xmlCount + " tài liệu XML");
+            archive.setMessage(xmlCount == 0 ? "ZIP không chứa XML/PDF phù hợp" : "Đã đọc " + xmlCount + " tài liệu XML/PDF");
         } catch (Exception e) {
             archive.setState("ARCHIVE_FAILED");
             archive.setMessage(e instanceof IllegalArgumentException ? e.getMessage() : "ZIP hỏng hoặc không được hỗ trợ; các tài liệu đã nhận vẫn được giữ");
@@ -109,6 +109,7 @@ public class IntakeService {
     private IntakeItem record(UploadSession session, String name, byte[] bytes, boolean xml, String state, String message) {
         IntakeItem item = new IntakeItem(); item.setTenantId(session.getTenantId()); item.setSessionId(session.getId()); item.setFileName(name);
         item.setXmlDocument(xml); item.setState(state); item.setMessage(message);
+        item.setDocumentType(xml ? "XML" : name.toLowerCase(Locale.ROOT).endsWith(".pdf") ? "PDF" : "OTHER");
         if (bytes != null) {
             item.setFileSize(bytes.length); item.setContentHash(AuditValidationService.computeSha256(bytes));
             try { item.setStoragePath(storage.storeBytes(bytes)); }
@@ -130,6 +131,9 @@ public class IntakeService {
         Map<String, Long> counts=new LinkedHashMap<>();
         counts.put("uploadedFiles", (long) session.getUploadedFiles());
         counts.put("xmlDocuments", list.stream().filter(IntakeItem::isXmlDocument).count());
+        counts.put("pdfDocuments",list.stream().filter(i -> "PDF".equals(i.getDocumentType())).count());
+        counts.put("OCR_REVIEW",list.stream().filter(i -> "OCR_REVIEW".equals(i.getState())).count());
+        counts.put("OCR_FAILED",list.stream().filter(i -> "OCR_FAILED".equals(i.getState())).count());
         for (String state : List.of("INGESTED", "ALREADY_RECEIVED", "DUPLICATE_IDENTITY", "PARSE_FAILED", "REJECTED_OUTBOUND", "PROCESSING_FAILED", "STORAGE_FAILED", "ARCHIVE_FAILED", "INVALID_ARCHIVE", "ARCHIVE_EMPTY", "UNSUPPORTED"))
             counts.put(state, list.stream().filter(i -> state.equals(i.getState())).count());
         return new SessionResult(session, list, counts);

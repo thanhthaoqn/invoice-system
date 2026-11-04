@@ -1,5 +1,11 @@
 # Work log — SmartExpense Sprint 1
 
+2026-11-04: Added real digital-PDF extraction and configured Gemini scan OCR,
+matching XML fields. Added stored PDF drafts, versioned edits, explicit confirmation,
+pending invoice creation, XML/PDF dedup and authorized original preview. Removed
+Java's simulated extraction fallback. Verified 18 backend tests, 7 Python tests,
+frontend build and two live synthetic PDFs (text and scanned image). See pdf-intake.md.
+
 2026-11-03: User selected implementation of Sprint 1 in the current SmartExpense
 repository. The supplied inbot backlog is used as requirements; referenced Vue,
 Redis, intake and multi-tenant services did not exist in this repository.
