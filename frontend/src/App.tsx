@@ -4,9 +4,11 @@ import { UploadSection } from './components/UploadSection';
 import { SplitScreenReview } from './components/SplitScreenReview';
 import { AnalyticsDashboard } from './components/AnalyticsDashboard';
 import { ErrorLogViewer } from './components/ErrorLogViewer';
+import { SessionGate } from './components/SessionGate';
+import type { Session } from './services/api';
 import { api, type Invoice } from './services/api';
 
-export const App: React.FC = () => {
+const Workspace: React.FC<{ session: Session }> = ({ session }) => {
   const [activeTab, setActiveTab] = useState<'upload' | 'review' | 'analytics' | 'logs'>('upload');
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
@@ -34,7 +36,7 @@ export const App: React.FC = () => {
   }, []);
 
   const handleInvoiceUploaded = (newInvoice: Invoice) => {
-    setInvoices((prev) => [newInvoice, ...prev]);
+    setInvoices((prev) => [newInvoice, ...prev.filter(item => item.id !== newInvoice.id)]);
     setSelectedInvoice(newInvoice);
     setActiveTab('review'); // Automatically guide user directly into split-screen verification!
   };
@@ -62,6 +64,7 @@ export const App: React.FC = () => {
       <main className="flex-1 px-4 sm:px-6 lg:px-8">
         {activeTab === 'upload' && (
           <UploadSection
+            session={session}
             onInvoiceUploaded={handleInvoiceUploaded}
             onSelectInvoiceForReview={handleSelectInvoiceForReview}
             invoices={invoices}
@@ -76,6 +79,7 @@ export const App: React.FC = () => {
               invoice={selectedInvoice}
               onBack={() => setActiveTab('upload')}
               onReviewed={handleReviewed}
+              canReview={session.invoiceReview}
             />
           ) : (
             <div className="text-center py-24 space-y-4">
@@ -97,5 +101,7 @@ export const App: React.FC = () => {
     </div>
   );
 };
+
+export const App = () => <SessionGate>{session => <Workspace key={session.tenantId} session={session} />}</SessionGate>;
 
 export default App;

@@ -83,6 +83,7 @@ public class InvoiceService {
         }
 
         Invoice invoice = Invoice.builder()
+                .tenantId(com.fsa.expense.auth.TenantContext.id())
                 .invoiceNumber(aiResult.getInvoiceNumber())
                 .invoiceDate(invoiceDate)
                 .vendorName(aiResult.getVendorName())
@@ -142,14 +143,28 @@ public class InvoiceService {
 
     public InvoiceResponseDto getInvoiceById(Long id) {
         Invoice invoice = invoiceRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Invoice not found with id: " + id));
+                .orElseThrow(() -> com.fsa.expense.auth.AuthService.error(404, "Không tìm thấy hóa đơn"));
         return toDto(invoice);
+    }
+
+    @Transactional
+    public InvoiceResponseDto recheck(Long id) {
+        Invoice invoice=invoiceRepository.findById(id).orElseThrow(() -> com.fsa.expense.auth.AuthService.error(404, "Không tìm thấy hóa đơn"));
+        auditValidationService.auditInvoice(invoice, null);
+        invoice.setValidationState("CHECKED");
+        // Preserve the buyer routing warning from intake.
+        if ("XML".equals(invoice.getFileType())) {
+            var data=(org.springframework.web.context.request.ServletRequestAttributes) org.springframework.web.context.request.RequestContextHolder.currentRequestAttributes();
+            String tenantTax=(String) data.getRequest().getAttribute("tenantTaxCode");
+            if (!java.util.Objects.equals(tenantTax, invoice.getBuyerTaxCode())) invoice.setValidationState("BUYER_MISMATCH");
+        }
+        return toDto(invoiceRepository.save(invoice));
     }
 
     @Transactional
     public InvoiceResponseDto reviewInvoice(Long id, ReviewInvoiceRequest request) {
         Invoice invoice = invoiceRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Invoice not found with id: " + id));
+                .orElseThrow(() -> com.fsa.expense.auth.AuthService.error(404, "Không tìm thấy hóa đơn"));
 
         // Parse original AI extraction to track discrepancies
         AiExtractionDto originalAi = null;
@@ -276,6 +291,10 @@ public class InvoiceService {
 
         return InvoiceResponseDto.builder()
                 .id(invoice.getId())
+                .validationState(invoice.getValidationState())
+                .buyerTaxCode(invoice.getBuyerTaxCode())
+                .invoiceTemplate(invoice.getInvoiceTemplate())
+                .invoiceSeries(invoice.getInvoiceSeries())
                 .invoiceNumber(invoice.getInvoiceNumber())
                 .invoiceDate(invoice.getInvoiceDate())
                 .vendorName(invoice.getVendorName())

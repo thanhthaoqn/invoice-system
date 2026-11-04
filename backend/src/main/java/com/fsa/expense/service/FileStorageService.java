@@ -49,7 +49,9 @@ public class FileStorageService {
         Path targetPath = this.storageLocation.resolve(storedFilename);
 
         try {
-            Files.copy(file.getInputStream(), targetPath, StandardCopyOption.REPLACE_EXISTING);
+            try (var input = file.getInputStream()) {
+                Files.copy(input, targetPath);
+            }
             log.info("Saved uploaded file {} as {}", originalFilename, storedFilename);
             return storedFilename;
         } catch (IOException e) {
@@ -60,6 +62,7 @@ public class FileStorageService {
     public Resource loadFileAsResource(String filename) {
         try {
             Path filePath = this.storageLocation.resolve(filename).normalize();
+            if (!filePath.startsWith(this.storageLocation)) throw new IllegalArgumentException("Invalid storage path");
             Resource resource = new UrlResource(filePath.toUri());
             if (resource.exists() && resource.isReadable()) {
                 return resource;
@@ -72,6 +75,19 @@ public class FileStorageService {
     }
 
     public Path getFilePath(String filename) {
-        return this.storageLocation.resolve(filename);
+        Path path = this.storageLocation.resolve(filename).normalize();
+        if (!path.startsWith(this.storageLocation)) throw new IllegalArgumentException("Invalid storage path");
+        return path;
+    }
+
+    public String storeBytes(byte[] bytes) {
+        String name = UUID.randomUUID() + ".bin";
+        try (var channel=java.nio.channels.FileChannel.open(getFilePath(name), StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE)) {
+            var buffer=java.nio.ByteBuffer.wrap(bytes);
+            while (buffer.hasRemaining()) channel.write(buffer);
+            channel.force(true);
+            return name;
+        }
+        catch (IOException e) { throw new IllegalStateException("Không lưu được tài liệu gốc", e); }
     }
 }

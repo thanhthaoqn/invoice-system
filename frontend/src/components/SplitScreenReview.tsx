@@ -10,7 +10,6 @@ import {
   Sparkles,
   ArrowLeft,
   ShieldCheck,
-  Zap,
   CreditCard,
   BookOpen
 } from 'lucide-react';
@@ -21,12 +20,14 @@ interface SplitScreenReviewProps {
   invoice: Invoice;
   onBack: () => void;
   onReviewed: (updated: Invoice) => void;
+  canReview: boolean;
 }
 
 export const SplitScreenReview: React.FC<SplitScreenReviewProps> = ({
   invoice,
   onBack,
-  onReviewed
+  onReviewed,
+  canReview
 }) => {
   // Form state initialized from invoice (AI-extracted)
   const [invoiceNumber, setInvoiceNumber] = useState(invoice.invoiceNumber || '');
@@ -108,6 +109,7 @@ export const SplitScreenReview: React.FC<SplitScreenReviewProps> = ({
 
   // Submit Review Actions
   const handleReview = async (targetStatus: 'APPROVED' | 'REJECTED') => {
+    if (saving || !canReview) return;
     try {
       setSaving(true);
       const payload: ReviewInvoiceRequest = {
@@ -129,7 +131,7 @@ export const SplitScreenReview: React.FC<SplitScreenReviewProps> = ({
       };
 
       const updated = await api.reviewInvoice(invoice.id, payload);
-      setActionSuccess(targetStatus === 'APPROVED' ? 'Đã duyệt hóa đơn thành công (< 1s)!' : 'Đã từ chối hóa đơn.');
+      setActionSuccess(targetStatus === 'APPROVED' ? 'Đã duyệt hóa đơn thành công.' : 'Đã từ chối hóa đơn.');
       onReviewed(updated);
     } catch (err) {
       console.error(err);
@@ -142,11 +144,13 @@ export const SplitScreenReview: React.FC<SplitScreenReviewProps> = ({
   // Check live arithmetic equality
   const computedSum = subtotalAmount + vatAmount;
   const isArithmeticMatched = Math.abs(computedSum - totalAmount) <= 1000;
+  const isXml = invoice.fileType === 'XML' || invoice.extractionMethod === 'XML_IMPORT';
+  const extractionLabel = isXml ? 'Nhập XML' : invoice.extractionMethod === 'PYMUPDF_VECTOR_TEXT' ? 'Đọc văn bản PDF' : invoice.extractionMethod || 'Trích xuất chứng từ';
 
   return (
-    <div className="h-[calc(100vh-5rem)] flex flex-col py-2 max-w-[1700px] mx-auto px-4">
+    <div className="lg:h-[calc(100dvh-9rem)] min-h-[36rem] flex flex-col py-2 max-w-[1700px] mx-auto px-2 sm:px-4">
       {/* Top Bar Navigation & Info */}
-      <div className="flex items-center justify-between py-2 border-b border-slate-200 mb-3">
+      <div className="flex flex-wrap gap-3 items-center justify-between py-2 border-b border-slate-200 mb-3 shrink-0">
         <div className="flex items-center space-x-3">
           <button
             onClick={onBack}
@@ -188,38 +192,28 @@ export const SplitScreenReview: React.FC<SplitScreenReviewProps> = ({
       </div>
 
       {/* Split Screen 50/50 Layout */}
-      <div className="flex-1 grid grid-cols-1 lg:grid-cols-2 gap-4 overflow-hidden">
+      <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-2 gap-4 lg:overflow-hidden">
         {/* Left Window: Document Viewer */}
-        <div className="h-full overflow-hidden">
-          <DocumentViewer invoice={invoice} />
+        <div className="h-[65vh] lg:h-full min-h-0 min-w-0 overflow-hidden">
+          <DocumentViewer key={invoice.id} invoice={invoice} />
         </div>
 
         {/* Right Window: AI Extraction Verification Form */}
-        <div className="h-full flex flex-col bg-white border border-slate-200/90 rounded-2xl overflow-hidden shadow-sm">
+        <div className="lg:h-full min-h-0 min-w-0 flex flex-col bg-white border border-slate-200/90 rounded-2xl overflow-hidden shadow-sm">
           {/* Header & Audit Badges */}
-          <div className="p-4 bg-slate-50/80 border-b border-slate-200 space-y-2">
-            <div className="flex items-center justify-between">
+          <div className="p-4 bg-slate-50/80 border-b border-slate-200 space-y-2 shrink-0">
+            <div className="flex flex-wrap gap-2 items-center justify-between">
               <div className="flex items-center space-x-2">
                 <Sparkles className="w-4 h-4 text-indigo-600" />
-                <h3 className="text-sm font-bold text-slate-900">Dữ Liệu Trích Xuất AI & Kiểm Toán Tự Động</h3>
+                <h3 className="text-sm font-bold text-slate-900">{isXml ? 'Dữ liệu XML & Đối soát' : 'Dữ liệu trích xuất & Đối soát'}</h3>
               </div>
               <div className="flex items-center space-x-2">
-                {invoice.extractionMethod === 'PYMUPDF_VECTOR_TEXT' ? (
-                  <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-50 text-amber-800 border border-amber-200">
-                    <Zap className="w-3.5 h-3.5 text-amber-600" />
-                    <span>PyMuPDF Vector (&lt;50ms)</span>
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
-                    <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
-                    <span>Gemini Vision AI</span>
-                  </span>
-                )}
-                <span className="text-[11px] text-slate-500 font-mono font-medium">
-                  Độ tin cậy: 97%
-                </span>
+                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">{extractionLabel}</span>
               </div>
             </div>
+
+            {invoice.validationState === 'NOT_CHECKED' && <p role="status" className="p-2.5 rounded-xl bg-amber-50 text-amber-800 text-xs">Kiểm tra tự động chưa hoàn tất. Các phép cộng bên dưới chỉ đối chiếu các trường đang hiển thị.</p>}
+            {invoice.validationState === 'BUYER_MISMATCH' && <p role="status" className="p-2.5 rounded-xl bg-amber-50 text-amber-800 text-xs">MST người mua thiếu hoặc khác doanh nghiệp nhận. Cần kiểm tra người mua trong XML gốc trước khi duyệt.</p>}
 
             {/* Audit Status Banners */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
@@ -238,7 +232,7 @@ export const SplitScreenReview: React.FC<SplitScreenReviewProps> = ({
                 )}
                 <div>
                   <div className="font-bold text-[11px]">
-                    {isArithmeticMatched ? 'Số học hợp lệ' : 'Cảnh báo sai lệch số học'}
+                    {isArithmeticMatched ? 'Tổng tiền đang khớp' : 'Cảnh báo sai lệch số học'}
                   </div>
                   <div className="text-[10px] text-slate-600 mt-0.5">
                     {isArithmeticMatched
@@ -263,11 +257,11 @@ export const SplitScreenReview: React.FC<SplitScreenReviewProps> = ({
                 )}
                 <div>
                   <div className="font-bold text-[11px]">
-                    {!invoice.duplicateSuspected ? 'Chứng từ duy nhất' : 'Nghi vấn trùng lặp'}
+                    {!invoice.duplicateSuspected ? 'Chưa phát hiện trùng' : 'Nghi vấn trùng lặp'}
                   </div>
                   <div className="text-[10px] text-slate-600 mt-0.5">
                     {!invoice.duplicateSuspected
-                      ? 'Chưa từng xuất hiện Số HĐ và MST này trong CSDL'
+                      ? 'Không phát hiện bản trùng trong doanh nghiệp hiện tại'
                       : invoice.duplicateWarningMessage || 'Đã phát hiện hóa đơn tương tự'}
                   </div>
                 </div>
@@ -366,7 +360,7 @@ export const SplitScreenReview: React.FC<SplitScreenReviewProps> = ({
           </div>
 
           {/* Form Scrollable Body */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4">
             {/* Primary Fields Grid */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
               <div>
@@ -572,9 +566,9 @@ export const SplitScreenReview: React.FC<SplitScreenReviewProps> = ({
           </div>
 
           {/* Action Bar */}
-          <div className="p-3.5 bg-slate-50/90 border-t border-slate-200 flex items-center justify-between">
+          <div className="p-3.5 bg-slate-50/90 border-t border-slate-200 flex flex-wrap gap-2 items-center justify-between shrink-0">
             <button
-              disabled={saving}
+              disabled={saving || !canReview}
               onClick={() => handleReview('REJECTED')}
               className="flex items-center space-x-1.5 px-4 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold transition shadow-xs"
             >
@@ -584,7 +578,7 @@ export const SplitScreenReview: React.FC<SplitScreenReviewProps> = ({
 
             <div className="flex items-center space-x-3">
               <button
-                disabled={saving}
+                disabled={saving || !canReview}
                 onClick={() => handleReview('APPROVED')}
                 className="flex items-center space-x-1.5 px-4 py-2 rounded-xl bg-white hover:bg-slate-100 border border-slate-300 text-slate-700 hover:text-slate-900 text-xs font-bold transition shadow-xs"
                 title="Lưu các trường đã chỉnh sửa vào Error Log và Duyệt"
@@ -594,12 +588,12 @@ export const SplitScreenReview: React.FC<SplitScreenReviewProps> = ({
               </button>
 
               <button
-                disabled={saving}
+                disabled={saving || !canReview}
                 onClick={() => handleReview('APPROVED')}
                 className="flex items-center space-x-2 px-6 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-extrabold shadow-md shadow-emerald-600/25 hover:scale-[1.02] active:scale-[0.98] transition-all"
               >
                 <Check className="w-4 h-4" />
-                <span>1-Click Duyệt Nhanh (&lt; 1s)</span>
+                <span>Duyệt hóa đơn</span>
               </button>
             </div>
           </div>

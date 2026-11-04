@@ -44,9 +44,7 @@ public class InvoiceController {
     public ResponseEntity<InvoiceResponseDto> uploadInvoice(
             @RequestParam("file") MultipartFile file,
             @RequestParam(value = "submittedBy", required = false) String submittedBy) {
-        log.info("Received invoice upload request: {}", file.getOriginalFilename());
-        InvoiceResponseDto response = invoiceService.uploadAndProcess(file, submittedBy);
-        return ResponseEntity.ok(response);
+        throw com.fsa.expense.auth.AuthService.error(410, "Sử dụng /api/intake/sessions để tiếp nhận XML/ZIP");
     }
 
     @GetMapping
@@ -59,6 +57,9 @@ public class InvoiceController {
     public ResponseEntity<InvoiceResponseDto> getInvoice(@PathVariable("id") Long id) {
         return ResponseEntity.ok(invoiceService.getInvoiceById(id));
     }
+
+    @PostMapping("/{id}/recheck")
+    public InvoiceResponseDto recheck(@PathVariable Long id) { return invoiceService.recheck(id); }
 
     @PutMapping("/{id}/review")
     public ResponseEntity<InvoiceResponseDto> reviewInvoice(
@@ -77,7 +78,9 @@ public class InvoiceController {
         Resource resource = fileStorageService.loadFileAsResource(targetPath);
 
         String mimeType = "application/octet-stream";
-        if (invoice.getFileType() != null && invoice.getFileType().equalsIgnoreCase("PDF")) {
+        if ("XML".equals(invoice.getFileType())) {
+            mimeType = "application/xml";
+        } else if (invoice.getFileType() != null && invoice.getFileType().equalsIgnoreCase("PDF")) {
             mimeType = MediaType.APPLICATION_PDF_VALUE;
         } else if (invoice.getFileName() != null && invoice.getFileName().toLowerCase().endsWith(".png")) {
             mimeType = MediaType.IMAGE_PNG_VALUE;
@@ -93,12 +96,7 @@ public class InvoiceController {
 
     @GetMapping("/files/{filename}")
     public ResponseEntity<Resource> serveDirectFile(@PathVariable("filename") String filename) {
-        Resource resource = fileStorageService.loadFileAsResource(filename);
-        String contentType = filename.toLowerCase().endsWith(".pdf") ? "application/pdf" : "image/jpeg";
-        return ResponseEntity.ok()
-                .contentType(MediaType.parseMediaType(contentType))
-                .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + filename + "\"")
-                .body(resource);
+        throw com.fsa.expense.auth.AuthService.error(404, "Dùng đường dẫn tệp theo hóa đơn để kiểm tra quyền truy cập");
     }
 
     @GetMapping("/export")

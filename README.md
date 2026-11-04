@@ -1,3 +1,9 @@
+# Sprint 1: login và tiếp nhận XML/ZIP
+
+Luồng upload mới yêu cầu đăng nhập và chọn doanh nghiệp. Xem
+[hướng dẫn khởi chạy, cấp tài khoản và các thay đổi Sprint 1](docs/sprint-1-smart-expense.md)
+trước khi dùng. Các mô tả OCR/demo cũ bên dưới không phải luồng XML/ZIP mới.
+
 # Smart Expense Reimbursement & Invoice Audit
 ## Hệ Thống Tự Động Hóa Quyết Toán & Kiểm Toán Chi Phí Doanh Nghiệp
 

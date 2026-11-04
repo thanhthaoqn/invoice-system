@@ -10,7 +10,16 @@ import java.util.List;
 @Repository
 public interface ErrorLogRepository extends JpaRepository<ErrorLog, Long> {
 
+    @Query("select e from ErrorLog e where e.invoiceId in (select i.id from Invoice i where i.tenantId = ?#{T(com.fsa.expense.auth.TenantContext).id()}) order by e.createdAt desc")
     List<ErrorLog> findAllByOrderByCreatedAtDesc();
+
+    @Override
+    @Query("select e from ErrorLog e where e.invoiceId in (select i.id from Invoice i where i.tenantId = ?#{T(com.fsa.expense.auth.TenantContext).id()})")
+    List<ErrorLog> findAll();
+
+    @Override
+    @Query("select count(e) from ErrorLog e where e.invoiceId in (select i.id from Invoice i where i.tenantId = ?#{T(com.fsa.expense.auth.TenantContext).id()})")
+    long count();
 
     List<ErrorLog> findByInvoiceIdOrderByCreatedAtDesc(Long invoiceId);
 

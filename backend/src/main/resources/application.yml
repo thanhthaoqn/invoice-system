@@ -1,5 +1,12 @@
 server:
   port: 8088
+  servlet:
+    session:
+      timeout: 30m
+      cookie:
+        http-only: true
+        same-site: strict
+        secure: ${SESSION_COOKIE_SECURE:false}
 
 spring:
   application:
@@ -22,6 +29,14 @@ spring:
       max-request-size: 25MB
 
 app:
+  intake:
+    max-files: 20
+    max-file-bytes: 15728640
+    max-batch-bytes: 25165824
+    max-entries: 200
+    max-expanded-bytes: 52428800
+    max-compression-ratio: 100
+    max-attempts: 3
   ai-service:
     url: http://127.0.0.1:8000/api/extract
   storage:

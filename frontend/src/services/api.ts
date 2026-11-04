@@ -2,6 +2,48 @@ import axios from 'axios';
 
 const API_BASE = '/api';
 
+let csrfToken = '';
+axios.interceptors.request.use(config => {
+  if (config.url?.startsWith('/api/') && config.method && !['get', 'head', 'options'].includes(config.method)) {
+    config.headers.set('X-CSRF-Token', csrfToken);
+  }
+  return config;
+});
+axios.interceptors.response.use(response => response, error => {
+  if (error.response?.status === 401 && !['/api/auth/login', '/api/auth/me'].includes(error.config?.url)) {
+    csrfToken = '';
+    window.dispatchEvent(new Event('session-expired'));
+  }
+  return Promise.reject(error);
+});
+
+export interface Tenant { id: number; name: string; taxCode: string; status: string; subscriptionStatus: string }
+export interface Session { username: string; tenants: Tenant[]; tenantId: number | null; invoiceCreate: boolean; invoiceReview: boolean; csrfToken: string }
+export interface IntakeLimits { maxFiles: number; maxFileBytes: number; maxBatchBytes: number; maxEntries: number; maxExpandedBytes: number; maxCompressionRatio: number; maxAttempts: number }
+export interface IntakeItem { id: number; fileName: string; fileSize: number; xmlDocument: boolean; retryable: boolean; state: string; message: string; invoiceId: number | null; originalItemId: number | null; attempts: number }
+export interface UploadResult { session: { id: number; tenantId: number; submittedBy: string; createdAt: string; uploadedFiles: number; state: string }; items: IntakeItem[]; counts: Record<string, number> }
+export const errorMessage = (error: unknown): string => axios.isAxiosError(error) ? error.response?.data?.message || 'Không kết nối được máy chủ. Kiểm tra lịch sử trước khi gửi lại.' : 'Thao tác chưa hoàn tất.';
+async function saveSession(request: Promise<{ data: Session }>): Promise<Session> {
+  const { data } = await request; csrfToken = data.csrfToken; return data;
+}
+export const authApi = {
+  me: () => saveSession(axios.get<Session>('/api/auth/me')),
+  login: (username: string, password: string) => saveSession(axios.post<Session>('/api/auth/login', { username, password })),
+  selectTenant: (tenantId: number) => saveSession(axios.post<Session>('/api/auth/tenant', { tenantId })),
+  logout: async () => { await axios.post('/api/auth/logout'); csrfToken = ''; },
+};
+export const intakeApi = {
+  limits: async () => (await axios.get<IntakeLimits>('/api/intake/limits')).data,
+  history: async () => (await axios.get<UploadResult[]>('/api/intake/sessions')).data,
+  upload: async (files: File[], onProgress: (percent: number) => void) => {
+    const data = new FormData(); files.forEach(file => data.append('files', file));
+    return (await axios.post<UploadResult>('/api/intake/sessions', data, {
+      onUploadProgress: event => onProgress(event.total ? Math.round(event.loaded / event.total * 100) : 0),
+    })).data;
+  },
+  retry: async (sessionId: number, itemId: number) => (await axios.post<UploadResult>(`/api/intake/sessions/${sessionId}/items/${itemId}/retry`)).data,
+};
+
 export interface InvoiceLineItem {
   id?: number;
   itemName: string;
@@ -14,6 +56,10 @@ export interface InvoiceLineItem {
 
 export interface Invoice {
   id: number;
+  validationState?: string | null;
+  buyerTaxCode?: string | null;
+  invoiceTemplate?: string | null;
+  invoiceSeries?: string | null;
   invoiceNumber: string | null;
   invoiceDate: string | null;
   vendorName: string | null;
@@ -109,6 +155,7 @@ export interface ErrorLog {
 }
 
 export const api = {
+  recheckInvoice: async (id: number): Promise<Invoice> => (await axios.post<Invoice>(`/api/invoices/${id}/recheck`)).data,
   uploadInvoice: async (file: File, submittedBy?: string): Promise<Invoice> => {
     const formData = new FormData();
     formData.append('file', file);

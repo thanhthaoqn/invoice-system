@@ -11,13 +11,23 @@ import java.util.ArrayList;
 import java.util.List;
 
 @Entity
-@Table(name = "invoices")
+@Table(name = "invoices", uniqueConstraints = {
+    @UniqueConstraint(name = "uk_invoice_tenant_hash", columnNames = {"tenantId", "content_hash"}),
+    @UniqueConstraint(name = "uk_invoice_tenant_identity", columnNames = {"tenantId", "identityKey"})
+})
 @Getter
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
 public class Invoice {
+
+    private Long tenantId;
+    private String invoiceTemplate;
+    private String invoiceSeries;
+    private String identityKey;
+    private String buyerTaxCode;
+    private String validationState;
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -116,11 +126,11 @@ public class Invoice {
     @Column(name = "raw_ai_response", columnDefinition = "TEXT")
     private String rawAiResponse;
 
-    @Column(name = "submitted_by", length = 100)
+    @Column(name = "submitted_by", length = 255)
     @Builder.Default
     private String submittedBy = "Nhân viên Nguyễn Văn A";
 
-    @Column(name = "reviewed_by", length = 100)
+    @Column(name = "reviewed_by", length = 255)
     private String reviewedBy;
 
     @Column(name = "reviewed_at")

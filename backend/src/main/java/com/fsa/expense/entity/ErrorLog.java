@@ -33,7 +33,7 @@ public class ErrorLog {
     @Column(name = "reason", columnDefinition = "TEXT")
     private String reason;
 
-    @Column(name = "corrected_by", length = 100)
+    @Column(name = "corrected_by", length = 255)
     private String correctedBy;
 
     @Column(name = "created_at")

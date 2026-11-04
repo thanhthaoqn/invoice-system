@@ -16,6 +16,10 @@ import java.util.List;
 @Builder
 public class InvoiceResponseDto {
     private Long id;
+    private String validationState;
+    private String buyerTaxCode;
+    private String invoiceTemplate;
+    private String invoiceSeries;
     private String invoiceNumber;
     private LocalDate invoiceDate;
     private String vendorName;
