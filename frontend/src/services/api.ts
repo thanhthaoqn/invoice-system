@@ -56,6 +56,15 @@ export const intakeApi = {
   retry: async (sessionId: number, itemId: number) => (await axios.post<UploadResult>(`/api/intake/sessions/${sessionId}/items/${itemId}/retry`)).data,
 };
 
+export interface GmailStatus { configured: boolean; admin: boolean; connected: boolean; emailAddress: string | null; state: string; lastSyncAt: string | null; lastError: string | null }
+export interface GmailSyncResult { discovered: number; processed: number; failed: number; completedAt: string }
+export const gmailApi = {
+  status: async () => (await axios.get<GmailStatus>('/api/gmail/status')).data,
+  authorizationUrl: async () => (await axios.post<{url: string}>('/api/gmail/oauth/authorization-url')).data.url,
+  sync: async () => (await axios.post<GmailSyncResult>('/api/gmail/sync')).data,
+  disconnect: async () => { await axios.post('/api/gmail/disconnect'); },
+};
+
 export interface InvoiceLineItem {
   id?: number;
   itemName: string;

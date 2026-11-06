@@ -25,8 +25,11 @@ public class AuthInterceptor implements HandlerInterceptor {
         Membership membership = auth.membership(user.getId(), tenantId);
         if (mutate) {
             if (user.isMustChangePassword() || "GRACE".equals(tenants.findById(tenantId).orElseThrow().getSubscriptionStatus())) throw AuthService.error(403, "Phiên chỉ được phép đọc dữ liệu");
-            boolean review = path.endsWith("/review");
-            if (review ? !membership.isInvoiceReview() : !membership.isInvoiceCreate()) throw AuthService.error(403, "Không có quyền thực hiện thao tác");
+            // Gmail mutations use their own explicit tenant administrator grant.
+            if (!path.startsWith("/api/gmail/")) {
+                boolean review = path.endsWith("/review");
+                if (review ? !membership.isInvoiceReview() : !membership.isInvoiceCreate()) throw AuthService.error(403, "Không có quyền thực hiện thao tác");
+            }
         }
         request.setAttribute("tenantId", tenantId);
         request.setAttribute("tenantTaxCode", tenants.findById(tenantId).orElseThrow().getTaxCode());

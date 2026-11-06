@@ -31,8 +31,12 @@ public class IntakeProcessor {
     }
     @Transactional(propagation=Propagation.REQUIRES_NEW)
     public IntakeItem process(Long id, boolean retry) {
+        return process(id,retry,TenantContext.id(),TenantContext.username());
+    }
+    @Transactional(propagation=Propagation.REQUIRES_NEW)
+    public IntakeItem process(Long id, boolean retry, Long tenantId, String actor) {
         // Serialize canonical creation and retry per tenant across application instances.
-        Tenant tenant = tenants.lockById(TenantContext.id()).orElseThrow();
+        Tenant tenant = tenants.lockById(tenantId).orElseThrow();
         IntakeItem item = items.findByIdAndTenantId(id, tenant.getId()).orElseThrow(() -> AuthService.error(404, "Không tìm thấy tài liệu"));
         boolean stale = "RECEIVED".equals(item.getState()) && item.getUpdatedAt().isBefore(Instant.now().minusSeconds(300));
         if (retry && !("PARSE_FAILED".equals(item.getState()) || "PROCESSING_FAILED".equals(item.getState()) || "OCR_FAILED".equals(item.getState()) || stale)) throw AuthService.error(409, "Tài liệu không thuộc trạng thái được xử lý lại hoặc vẫn đang xử lý");
@@ -47,16 +51,16 @@ public class IntakeProcessor {
             item.setOriginalItemId(same.get().getId()); item.setInvoiceId(same.get().getInvoiceId());
             return finish(item, "ALREADY_RECEIVED", "Đã tiếp nhận nội dung này trước đó");
         }
-        if ("PDF".equals(item.getDocumentType())) {
+        if ("PDF".equals(item.getDocumentType()) || "IMAGE".equals(item.getDocumentType())) {
             var existing=items.findFirstByTenantIdAndContentHashAndStateOrderById(tenant.getId(), item.getContentHash(), "OCR_REVIEW");
             if (existing.isPresent() && !existing.get().getId().equals(item.getId())) {
                 item.setOriginalItemId(existing.get().getId());
                 return finish(item,"ALREADY_RECEIVED","PDF đã có hồ sơ chờ xác nhận; mở hồ sơ gốc để tiếp tục");
             }
-            if (bytes.length<5 || !new String(bytes,0,5,java.nio.charset.StandardCharsets.US_ASCII).equals("%PDF-"))
+            if ("PDF".equals(item.getDocumentType()) && (bytes.length<5 || !new String(bytes,0,5,java.nio.charset.StandardCharsets.US_ASCII).equals("%PDF-")))
                 return finish(item,"OCR_FAILED","Nội dung file không phải PDF");
             try {
-                var data=extraction.extractInvoice(new StoredPdf(bytes,baseName(item.getFileName())));
+                var data=extraction.extractInvoice(new StoredDocument(bytes,baseName(item.getFileName()),item.getDocumentType()));
                 item.setRawExtraction(json.writeValueAsString(data)); item.setDraftJson(item.getRawExtraction());
                 return finish(item,"OCR_REVIEW","Đã trích xuất PDF. Kiểm tra, bổ sung trường thiếu và xác nhận để tạo hóa đơn.");
             } catch (IllegalArgumentException | IllegalStateException e) {
@@ -68,9 +72,9 @@ public class IntakeProcessor {
         Invoice invoice;
         try { invoice=parser.parse(bytes); }
         catch (IllegalArgumentException e) { return finish(item, "PARSE_FAILED", e.getMessage()); }
-        return persist(item,tenant,invoice);
+        return persist(item,tenant,invoice,actor);
     }
-    private IntakeItem persist(IntakeItem item,Tenant tenant,Invoice invoice) {
+    private IntakeItem persist(IntakeItem item,Tenant tenant,Invoice invoice,String actor) {
         if (tenant.getTaxCode().equals(invoice.getTaxCode())) return finish(item, "REJECTED_OUTBOUND", "Đây là hóa đơn đầu ra của doanh nghiệp");
         var duplicate = invoices.findByTenantIdAndIdentityKey(tenant.getId(), invoice.getIdentityKey());
         if (duplicate.isPresent()) {
@@ -79,7 +83,7 @@ public class IntakeProcessor {
         }
         invoice.setTenantId(tenant.getId()); invoice.setContentHash(item.getContentHash());
         invoice.setFilePath(item.getStoragePath()); invoice.setFileName(baseName(item.getFileName()));
-        invoice.setFileSize(item.getFileSize()); invoice.setSubmittedBy(TenantContext.username());
+        invoice.setFileSize(item.getFileSize()); invoice.setSubmittedBy(actor);
         String message = "Đã tạo hóa đơn; chờ đối soát, chưa phê duyệt. Chưa xác minh chữ ký điện tử.";
         try {
             audit.auditInvoice(invoice, null);
@@ -99,7 +103,7 @@ public class IntakeProcessor {
     public IntakeItem savePdf(Long id,long version,com.fsa.expense.dto.AiExtractionDto draft,boolean confirm) {
         Tenant tenant=tenants.lockById(TenantContext.id()).orElseThrow();
         IntakeItem item=items.findByIdAndTenantId(id,tenant.getId()).orElseThrow(() -> AuthService.error(404,"Không tìm thấy hồ sơ PDF"));
-        if (!"PDF".equals(item.getDocumentType())) throw AuthService.error(409,"Tài liệu không phải PDF");
+        if (!("PDF".equals(item.getDocumentType()) || "IMAGE".equals(item.getDocumentType()))) throw AuthService.error(409,"Tài liệu không hỗ trợ xác nhận OCR");
         if (confirm && item.getInvoiceId()!=null) return item;
         if (!"OCR_REVIEW".equals(item.getState())) throw AuthService.error(409,"Hồ sơ không còn ở trạng thái chờ xác nhận");
         if (item.getVersion()!=version) throw AuthService.error(409,"Dữ liệu đã thay đổi; mở lại hồ sơ trước khi lưu");
@@ -109,18 +113,19 @@ public class IntakeProcessor {
             draft.setExtractionMethod(original.getExtractionMethod());
             item.setDraftJson(json.writeValueAsString(draft));
             if (!confirm) { item.setUpdatedAt(Instant.now()); return items.saveAndFlush(item); }
-            Invoice invoice=pdfMapper.invoice(draft);
+            Invoice invoice=pdfMapper.invoice(draft,item.getDocumentType());
             invoice.setRawAiResponse(item.getRawExtraction());
             item.setConfirmedBy(TenantContext.username()); item.setConfirmedAt(Instant.now()); item.setConfirmedSnapshot(item.getDraftJson());
-            return persist(item,tenant,invoice);
+            return persist(item,tenant,invoice,TenantContext.username());
         } catch (com.fasterxml.jackson.core.JsonProcessingException e) { throw new IllegalArgumentException("Dữ liệu PDF không hợp lệ"); }
     }
-    private record StoredPdf(byte[] bytes,String filename) implements org.springframework.web.multipart.MultipartFile {
+    private record StoredDocument(byte[] bytes,String filename,String documentType) implements org.springframework.web.multipart.MultipartFile {
         public String getName(){return "file";} public String getOriginalFilename(){return filename;}
-        public String getContentType(){return "application/pdf";} public boolean isEmpty(){return bytes.length==0;}
+        public String getContentType(){return "PDF".equals(documentType) ? "application/pdf" : imageType(filename);} public boolean isEmpty(){return bytes.length==0;}
         public long getSize(){return bytes.length;} public byte[] getBytes(){return bytes;}
         public java.io.InputStream getInputStream(){return new java.io.ByteArrayInputStream(bytes);}
         public void transferTo(java.io.File file) throws java.io.IOException {Files.write(file.toPath(),bytes);}
+        private static String imageType(String name) { return name.toLowerCase().endsWith(".png") ? "image/png" : "image/jpeg"; }
     }
     private IntakeItem finish(IntakeItem item, String state, String message) {
         item.setState(state); item.setMessage(message); item.setUpdatedAt(Instant.now());
@@ -130,8 +135,12 @@ public class IntakeProcessor {
     }
     @Transactional(propagation=Propagation.REQUIRES_NEW)
     public void recordFailure(Long id) {
-        tenants.lockById(TenantContext.id()).orElseThrow();
-        IntakeItem item=items.findByIdAndTenantId(id,TenantContext.id()).orElseThrow();
+        recordFailure(id,TenantContext.id());
+    }
+    @Transactional(propagation=Propagation.REQUIRES_NEW)
+    public void recordFailure(Long id,Long tenantId) {
+        tenants.lockById(tenantId).orElseThrow();
+        IntakeItem item=items.findByIdAndTenantId(id,tenantId).orElseThrow();
         if (!item.isRetryable() && !"RECEIVED".equals(item.getState())) return;
         if (item.getAttempts() >= limits.getMaxAttempts()) throw AuthService.error(409, "Đã đạt giới hạn xử lý lại");
         item.setAttempts(item.getAttempts()+1);

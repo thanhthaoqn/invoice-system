@@ -24,7 +24,7 @@ public class IntakeController {
     public record PdfDraft(long version,com.fsa.expense.dto.AiExtractionDto data) {}
     @GetMapping("/items/{id}/draft") public PdfDraft draft(@PathVariable Long id) throws com.fasterxml.jackson.core.JsonProcessingException {
         IntakeItem item=item(id);
-        if (!"PDF".equals(item.getDocumentType()) || item.getDraftJson()==null) throw AuthService.error(409,"Chưa có dữ liệu trích xuất PDF");
+        if (!("PDF".equals(item.getDocumentType()) || "IMAGE".equals(item.getDocumentType())) || item.getDraftJson()==null) throw AuthService.error(409,"Chưa có dữ liệu trích xuất tài liệu");
         return new PdfDraft(item.getVersion(),json.readValue(item.getDraftJson(),com.fsa.expense.dto.AiExtractionDto.class));
     }
     @PutMapping("/items/{id}/draft") public PdfDraft saveDraft(@PathVariable Long id,@RequestBody PdfDraft draft) throws com.fasterxml.jackson.core.JsonProcessingException {
@@ -49,10 +49,11 @@ public class IntakeController {
     @GetMapping("/items/{id}/file") public ResponseEntity<Resource> file(@PathVariable Long id) {
         IntakeItem item=item(id);
         if (item.getStoragePath()==null) throw AuthService.error(404, "Chưa có tài liệu gốc được lưu");
-        boolean pdf="PDF".equals(item.getDocumentType());
-        return ResponseEntity.ok().contentType(pdf ? MediaType.APPLICATION_PDF : MediaType.APPLICATION_OCTET_STREAM)
+        boolean pdf="PDF".equals(item.getDocumentType()), image="IMAGE".equals(item.getDocumentType());
+        MediaType type=pdf ? MediaType.APPLICATION_PDF : image && item.getFileName().toLowerCase().endsWith(".png") ? MediaType.IMAGE_PNG : image ? MediaType.IMAGE_JPEG : MediaType.APPLICATION_OCTET_STREAM;
+        return ResponseEntity.ok().contentType(type)
             .header("X-Content-Type-Options","nosniff")
-            .header(HttpHeaders.CONTENT_DISPOSITION, (pdf ? ContentDisposition.inline() : ContentDisposition.attachment()).filename("document-"+id+(pdf ? ".pdf" : ".bin")).build().toString())
+            .header(HttpHeaders.CONTENT_DISPOSITION, (pdf || image ? ContentDisposition.inline() : ContentDisposition.attachment()).filename("document-"+id+(pdf ? ".pdf" : image ? item.getFileName().toLowerCase().endsWith(".png") ? ".png" : ".jpg" : ".bin")).build().toString())
             .body(storage.loadFileAsResource(item.getStoragePath()));
     }
     private IntakeItem item(Long id) { return items.findByIdAndTenantId(id, TenantContext.id()).orElseThrow(() -> AuthService.error(404, "Không tìm thấy tài liệu")); }

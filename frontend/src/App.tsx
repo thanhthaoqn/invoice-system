@@ -5,11 +5,12 @@ import { SplitScreenReview } from './components/SplitScreenReview';
 import { AnalyticsDashboard } from './components/AnalyticsDashboard';
 import { ErrorLogViewer } from './components/ErrorLogViewer';
 import { SessionGate } from './components/SessionGate';
+import { GmailIntegrationPanel } from './components/GmailIntegrationPanel';
 import type { Session } from './services/api';
 import { api, type Invoice } from './services/api';
 
 const Workspace: React.FC<{ session: Session }> = ({ session }) => {
-  const [activeTab, setActiveTab] = useState<'upload' | 'review' | 'analytics' | 'logs'>('upload');
+  const [activeTab, setActiveTab] = useState<'upload' | 'review' | 'analytics' | 'logs' | 'gmail'>('upload');
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [loading, setLoading] = useState(false);
@@ -97,6 +98,8 @@ const Workspace: React.FC<{ session: Session }> = ({ session }) => {
         {activeTab === 'analytics' && <AnalyticsDashboard />}
 
         {activeTab === 'logs' && <ErrorLogViewer />}
+
+        {activeTab === 'gmail' && <GmailIntegrationPanel />}
       </main>
     </div>
   );

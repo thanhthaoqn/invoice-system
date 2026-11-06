@@ -19,6 +19,8 @@ public class IntakeService {
         this.sessions=sessions; this.items=items; this.storage=storage; this.processor=processor; this.limits=limits;
     }
     public record SessionResult(UploadSession session, List<IntakeItem> items, Map<String, Long> counts) {}
+    public record ExternalDocument(String fileName, byte[] bytes) {}
+    public record ExternalResult(Long sessionId, Long itemId, Long invoiceId, String state, String contentHash) {}
     public List<SessionResult> history() {
         return sessions.findTop100ByTenantIdOrderByCreatedAtDesc(TenantContext.id()).stream().map(this::result).toList();
     }
@@ -56,6 +58,27 @@ public class IntakeService {
         }
         sessions.save(session);
         return result(session);
+    }
+    public List<ExternalResult> ingestExternal(Long tenantId, String actor, List<ExternalDocument> documents) {
+        if (documents.isEmpty() || documents.size()>limits.getMaxFiles()) throw new IllegalArgumentException("Số file Gmail vượt giới hạn");
+        UploadSession session=new UploadSession(); session.setTenantId(tenantId); session.setSubmittedBy(actor); session.setUploadedFiles(documents.size());
+        sessions.save(session); List<ExternalResult> results=new ArrayList<>();
+        for (ExternalDocument document : documents) {
+            byte[] bytes=document.bytes();
+            if (bytes==null || bytes.length==0 || bytes.length>limits.getMaxFileBytes()) {
+                IntakeItem rejected=record(session,safeName(document.fileName()),null,false,"REJECTED_FILE","Attachment Gmail trống hoặc vượt giới hạn","OTHER");
+                results.add(new ExternalResult(session.getId(),rejected.getId(),null,rejected.getState(),null)); continue;
+            }
+            String type=sniff(bytes);
+            IntakeItem item=record(session,safeName(document.fileName()),bytes,"XML".equals(type),type==null ? "UNSUPPORTED" : "RECEIVED",
+                type==null ? "Định dạng attachment không được hỗ trợ" : "Đã lưu bản gốc từ Gmail",type==null ? "OTHER" : type);
+            if (type!=null && "RECEIVED".equals(item.getState())) {
+                try { item=processor.process(item.getId(),false,tenantId,actor); }
+                catch (RuntimeException e) { processor.recordFailure(item.getId(),tenantId); item=items.findById(item.getId()).orElseThrow(); }
+            }
+            results.add(new ExternalResult(session.getId(),item.getId(),item.getInvoiceId(),item.getState(),item.getContentHash()));
+        }
+        session.setState("COMPLETED"); sessions.save(session); return results;
     }
     private void unpack(UploadSession session, String name, byte[] bytes, Budget budget) {
         IntakeItem archive = record(session, name, bytes, false, "ARCHIVE_RECEIVED", "Đã lưu ZIP gốc");
@@ -107,9 +130,13 @@ public class IntakeService {
         }
     }
     private IntakeItem record(UploadSession session, String name, byte[] bytes, boolean xml, String state, String message) {
+        String type=xml ? "XML" : name.toLowerCase(Locale.ROOT).endsWith(".pdf") ? "PDF" : "OTHER";
+        return record(session,name,bytes,xml,state,message,type);
+    }
+    private IntakeItem record(UploadSession session, String name, byte[] bytes, boolean xml, String state, String message,String documentType) {
         IntakeItem item = new IntakeItem(); item.setTenantId(session.getTenantId()); item.setSessionId(session.getId()); item.setFileName(name);
         item.setXmlDocument(xml); item.setState(state); item.setMessage(message);
-        item.setDocumentType(xml ? "XML" : name.toLowerCase(Locale.ROOT).endsWith(".pdf") ? "PDF" : "OTHER");
+        item.setDocumentType(documentType);
         if (bytes != null) {
             item.setFileSize(bytes.length); item.setContentHash(AuditValidationService.computeSha256(bytes));
             try { item.setStoragePath(storage.storeBytes(bytes)); }
@@ -144,6 +171,13 @@ public class IntakeService {
         String value=parts[parts.length-1].replaceAll("[\\p{Cntrl}]", "_");
         if (value.isBlank()) return "unnamed";
         return value.substring(0, Math.min(value.length(), 200));
+    }
+    private String sniff(byte[] bytes) {
+        if (bytes.length>=5 && new String(bytes,0,5,java.nio.charset.StandardCharsets.US_ASCII).equals("%PDF-")) return "PDF";
+        if (bytes.length>=8 && bytes[0]==(byte)0x89 && bytes[1]=='P' && bytes[2]=='N' && bytes[3]=='G' && bytes[4]==13 && bytes[5]==10 && bytes[6]==26 && bytes[7]==10) return "IMAGE";
+        if (bytes.length>=3 && bytes[0]==(byte)0xff && bytes[1]==(byte)0xd8 && bytes[2]==(byte)0xff) return "IMAGE";
+        String prefix=new String(bytes,0,Math.min(bytes.length,256),java.nio.charset.StandardCharsets.UTF_8).replace("\uFEFF","").stripLeading();
+        return prefix.startsWith("<") ? "XML" : null;
     }
     private static class Budget { int entries; long expanded; }
 }

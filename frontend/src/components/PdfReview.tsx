@@ -42,16 +42,16 @@ export function PdfReview({ itemId, canEdit, onClose, onConfirmed }: Props) {
   return <div className="fixed inset-0 z-[60] bg-slate-900/40 p-2 sm:p-5" role="dialog" aria-modal="true" aria-labelledby="pdf-review-title">
     <section className="h-full max-w-[1700px] mx-auto flex flex-col overflow-hidden rounded-2xl bg-white shadow-xl">
       <header className="flex flex-wrap justify-between items-center gap-3 border-b px-5 py-3 shrink-0">
-        <div><h2 id="pdf-review-title" className="text-lg font-bold">Kiểm tra dữ liệu PDF</h2><p className="text-xs text-slate-500 mt-1">Xác nhận dữ liệu tạo hóa đơn chờ đối soát; chưa phê duyệt hay xác minh chữ ký.</p></div>
+        <div><h2 id="pdf-review-title" className="text-lg font-bold">Kiểm tra dữ liệu tài liệu</h2><p className="text-xs text-slate-500 mt-1">Xác nhận dữ liệu tạo hóa đơn chờ đối soát; chưa phê duyệt hay xác minh chữ ký.</p></div>
         <button disabled={busy} onClick={onClose} className="rounded-lg border px-3 py-2 text-sm">Đóng</button>
       </header>
       <div className="flex-1 min-h-0 overflow-auto lg:overflow-hidden grid grid-cols-1 lg:grid-cols-2">
-        <iframe title="PDF gốc để kiểm tra" src={`/api/intake/items/${itemId}/file`} className="w-full h-[60vh] lg:h-full border-0 bg-slate-100" />
+        <iframe title="Tài liệu gốc để kiểm tra" src={`/api/intake/items/${itemId}/file`} className="w-full h-[60vh] lg:h-full border-0 bg-slate-100" />
         <form onSubmit={event => { event.preventDefault(); void save(true); }} className="min-h-0 flex flex-col border-l">
           <div className="flex-1 min-h-0 overflow-y-auto p-5 space-y-5">
             {error && <p role="alert" className="rounded-lg bg-rose-50 p-3 text-sm text-rose-700">{error}</p>}
-            {!data ? <p className="text-slate-500">Đang tải dữ liệu PDF…</p> : <>
-              <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">Trường trống chưa được nhận diện. Đối chiếu bản PDF và bổ sung các trường có dấu * trước khi xác nhận.</p>
+            {!data ? <p className="text-slate-500">Đang tải dữ liệu tài liệu…</p> : <>
+              <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">Trường trống chưa được nhận diện. Đối chiếu bản gốc và bổ sung các trường có dấu * trước khi xác nhận.</p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">{fields.map(field => <label key={field.key} className="text-xs font-medium text-slate-600">
                 {field.label}{field.required && ' *'}
                 <input className={`${inputClass} ${data[field.key] == null || data[field.key] === '' ? 'border-amber-300 bg-amber-50/30' : ''}`} disabled={!canEdit || busy} type={field.type || 'text'} required={field.required} step={field.type === 'number' ? '0.01' : undefined}

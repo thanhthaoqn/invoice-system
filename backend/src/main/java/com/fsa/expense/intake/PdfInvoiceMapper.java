@@ -24,6 +24,9 @@ public class PdfInvoiceMapper {
         return value;
     }
     public Invoice invoice(AiExtractionDto data) {
+        return invoice(data, "PDF");
+    }
+    public Invoice invoice(AiExtractionDto data, String fileType) {
         Invoice invoice=Invoice.builder()
             .invoiceNumber(text(data.getInvoiceNumber(),50,"số hóa đơn",true))
             .invoiceTemplate(text(data.getInvoiceTemplate(),50,"mẫu số",true))
@@ -38,7 +41,7 @@ public class PdfInvoiceMapper {
             .subtotalAmount(amount(data.getSubtotalAmount(),"tổng trước thuế",true,13))
             .vatAmount(amount(data.getVatAmount(),"tiền thuế",true,13))
             .totalAmount(amount(data.getTotalAmount(),"tổng thanh toán",true,13))
-            .category("Chi phí Dịch vụ / Khác").fileType("PDF").source("OCR_CONFIRMED")
+            .category("Chi phí Dịch vụ / Khác").fileType(fileType).source("OCR_CONFIRMED")
             .extractionMethod(data.getExtractionMethod()).status(InvoiceStatus.PENDING_REVIEW).validationState("NOT_CHECKED").build();
         try { invoice.setInvoiceDate(LocalDate.parse(data.getInvoiceDate())); }
         catch (RuntimeException e) { throw new IllegalArgumentException("Ngày lập cần có định dạng YYYY-MM-DD"); }

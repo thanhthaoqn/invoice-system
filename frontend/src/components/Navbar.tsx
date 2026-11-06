@@ -1,9 +1,9 @@
 import React from 'react';
-import { FileSpreadsheet, Upload, LayoutDashboard, Database, CheckSquare } from 'lucide-react';
+import { FileSpreadsheet, Upload, LayoutDashboard, Database, CheckSquare, Mail } from 'lucide-react';
 
 interface NavbarProps {
-  activeTab: 'upload' | 'review' | 'analytics' | 'logs';
-  setActiveTab: (tab: 'upload' | 'review' | 'analytics' | 'logs') => void;
+  activeTab: 'upload' | 'review' | 'analytics' | 'logs' | 'gmail';
+  setActiveTab: (tab: 'upload' | 'review' | 'analytics' | 'logs' | 'gmail') => void;
   pendingCount: number;
 }
 
@@ -13,6 +13,7 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab, pending
     { id: 'review', label: 'Đối soát', icon: CheckSquare },
     { id: 'analytics', label: 'Báo cáo kế toán', icon: LayoutDashboard },
     { id: 'logs', label: 'Nhật ký đối soát', icon: Database },
+    { id: 'gmail', label: 'Kết nối Gmail', icon: Mail },
   ] as const;
   return (
     <header className="sticky top-0 z-50 bg-white/95 backdrop-blur-md border-b border-slate-200 shadow-xs">

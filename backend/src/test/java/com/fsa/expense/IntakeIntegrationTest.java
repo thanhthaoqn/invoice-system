@@ -35,6 +35,7 @@ class IntakeIntegrationTest {
     @Autowired UploadSessionRepository sessions;
     @Autowired IntakeAttemptRepository attempts;
     @Autowired ErrorLogRepository errors;
+    @Autowired com.fsa.expense.gmail.GmailAdminGrantRepository gmailAdmins;
     @Autowired IntakeLimits limits;
     @Autowired InvoiceXmlParser parser;
     @Autowired org.springframework.jdbc.core.JdbcTemplate jdbc;
@@ -48,7 +49,7 @@ class IntakeIntegrationTest {
     Tenant a; Tenant b; AppUser user;
     record Login(MockHttpSession session, String csrf) {}
     @BeforeEach void setup() {
-        errors.deleteAll(); invoices.deleteAll(); attempts.deleteAll(); items.deleteAll(); sessions.deleteAll(); memberships.deleteAll(); users.deleteAll(); tenants.deleteAll();
+        errors.deleteAll(); invoices.deleteAll(); attempts.deleteAll(); items.deleteAll(); sessions.deleteAll(); gmailAdmins.deleteAll(); memberships.deleteAll(); users.deleteAll(); tenants.deleteAll();
         a=tenant("Công ty A", "0100000001"); b=tenant("Công ty B", "0100000002");
         user=new AppUser(); user.setUsername("accountant"); user.setPasswordHash(Passwords.hash(PASSWORD)); users.save(user);
         member(a, true); limits.setMaxEntries(200); limits.setMaxExpandedBytes(50*1024*1024); limits.setMaxCompressionRatio(100); limits.setMaxFileBytes(15*1024*1024); limits.setMaxAttempts(3);
@@ -169,6 +170,15 @@ class IntakeIntegrationTest {
         mvc.perform(get("/api/invoices").session(login.session())).andExpect(status().isForbidden());
         mvc.perform(post("/api/auth/logout").session(login.session()).header("X-CSRF-Token",login.csrf())).andExpect(status().isOk());
         assertThat(login.session().isInvalid()).isTrue();
+    }
+
+    @Test void gmailMutationsRequireDedicatedAdminGrantNotInvoiceCreatePermission() throws Exception {
+        Membership membership=memberships.findByUserIdAndTenantId(user.getId(),a.getId()).orElseThrow();
+        membership.setInvoiceCreate(false); memberships.save(membership);
+        Login login=login();
+        mvc.perform(post("/api/gmail/disconnect").session(login.session()).header("X-CSRF-Token",login.csrf())).andExpect(status().isForbidden());
+        var grant=new com.fsa.expense.gmail.GmailAdminGrant(); grant.setUserId(user.getId()); grant.setTenantId(a.getId()); gmailAdmins.save(grant);
+        mvc.perform(post("/api/gmail/disconnect").session(login.session()).header("X-CSRF-Token",login.csrf())).andExpect(status().isOk());
     }
 
     @Test void storageFailureIsNotDurableAcceptanceAndCanBeUploadedAgain() throws Exception {
