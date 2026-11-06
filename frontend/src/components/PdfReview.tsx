@@ -38,12 +38,35 @@ export function PdfReview({ itemId, canEdit, onClose, onConfirmed }: Props) {
     } catch (err) { setError(errorMessage(err)); }
     finally { setBusy(false); }
   };
+  const handleReExtract = async () => {
+    if (busy || !canEdit) return;
+    setBusy(true); setError(''); setSaved(false);
+    try {
+      const fresh = await intakeApi.reExtractPdf(itemId);
+      setDraft(fresh);
+      setSaved(true);
+    } catch (err) { setError(errorMessage(err)); }
+    finally { setBusy(false); }
+  };
   const data = draft?.data;
   return <div className="fixed inset-0 z-[60] bg-slate-900/40 p-2 sm:p-5" role="dialog" aria-modal="true" aria-labelledby="pdf-review-title">
     <section className="h-full max-w-[1700px] mx-auto flex flex-col overflow-hidden rounded-2xl bg-white shadow-xl">
       <header className="flex flex-wrap justify-between items-center gap-3 border-b px-5 py-3 shrink-0">
         <div><h2 id="pdf-review-title" className="text-lg font-bold">Kiểm tra dữ liệu PDF</h2><p className="text-xs text-slate-500 mt-1">Xác nhận dữ liệu tạo hóa đơn chờ đối soát; chưa phê duyệt hay xác minh chữ ký.</p></div>
-        <button disabled={busy} onClick={onClose} className="rounded-lg border px-3 py-2 text-sm">Đóng</button>
+        <div className="flex items-center space-x-2">
+          {canEdit && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={handleReExtract}
+              className="rounded-lg border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 px-3 py-2 text-xs font-semibold flex items-center space-x-1.5 transition disabled:opacity-50"
+              title="Chạy lại bóc tách OCR từ file PDF gốc"
+            >
+              <span>🔄 Trích xuất lại từ PDF</span>
+            </button>
+          )}
+          <button disabled={busy} onClick={onClose} className="rounded-lg border px-3 py-2 text-sm hover:bg-slate-50">Đóng</button>
+        </div>
       </header>
       <div className="flex-1 min-h-0 overflow-auto lg:overflow-hidden grid grid-cols-1 lg:grid-cols-2">
         <iframe title="PDF gốc để kiểm tra" src={`/api/intake/items/${itemId}/file`} className="w-full h-[60vh] lg:h-full border-0 bg-slate-100" />

@@ -39,6 +39,10 @@ public class InvoiceXmlParser {
             Element seller = child(body, "NBan");
             Element buyer = child(body, "NMua");
             Element payment = child(body, "TToan");
+            String bName = text(buyer, "Ten", 255);
+            if (bName.isEmpty()) {
+                bName = text(buyer, "HVTNMHang", 255);
+            }
             Invoice invoice = Invoice.builder()
                 .invoiceNumber(required(header, "SHDon", 50))
                 .invoiceTemplate(required(header, "KHMSHDon", 50))
@@ -47,7 +51,7 @@ public class InvoiceXmlParser {
                 .vendorName(required(seller, "Ten", 255))
                 .taxCode(required(seller, "MST", 50))
                 .buyerTaxCode(text(buyer, "MST", 50))
-                .buyerName(text(buyer, "Ten", 255))
+                .buyerName(bName)
                 .buyerAddress(text(buyer, "DChi", 1000))
                 .sellerAddress(text(seller, "DChi", 1000))
                 .currency(text(header, "DVTTe", 10)).source("XML_IMPORT")

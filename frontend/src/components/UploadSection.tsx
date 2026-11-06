@@ -61,7 +61,19 @@ export function UploadSection({ session, onInvoiceUploaded, onSelectInvoiceForRe
     try {
       const result = await operation();
       setHistory(previous => [result, ...previous.filter(value => value.session.id !== result.session.id)]);
-      if (clearFiles) setFiles([]); onRefresh();
+      if (clearFiles) setFiles([]);
+      onRefresh();
+
+      // Tự động mở modal xác nhận dữ liệu PDF hoặc mở thẳng màn hình đối soát
+      const pendingPdf = result.items.find(i => i.state === 'OCR_REVIEW' || (i.documentType === 'PDF' && !i.invoiceId));
+      if (pendingPdf) {
+        setPdfItem(pendingPdf.originalItemId || pendingPdf.id);
+      } else {
+        const firstInvoice = result.items.find(i => i.invoiceId);
+        if (firstInvoice?.invoiceId) {
+          void open(firstInvoice.invoiceId);
+        }
+      }
     } catch (err) { setError(errorMessage(err)); } finally { lock.current = false; setBusy(false); }
   };
   const open = async (id: number) => { try { onInvoiceUploaded(await api.getInvoice(id)); } catch (err) { setError(errorMessage(err)); } };
@@ -107,11 +119,43 @@ export function UploadSection({ session, onInvoiceUploaded, onSelectInvoiceForRe
           <p className="text-xs text-slate-500">{result.session.state === 'COMPLETED' ? 'Đã kết thúc xử lý lô. Xem kết quả từng tài liệu.' : 'Phiên chưa hoàn tất; cần kiểm tra kết quả.'}</p></summary>
         <ul className="mt-4 divide-y divide-slate-100">{result.items.map(item => <li key={item.id} className="py-4 space-y-2">
           <div className="flex flex-wrap justify-between gap-2"><span className="font-medium text-sm break-all">{item.fileName}</span><span className="text-xs font-semibold text-indigo-700">{labels[item.state] || item.state}</span></div>
-          <p className="text-sm text-slate-500">{item.message}</p><div className="flex flex-wrap gap-4 text-xs text-indigo-700">
-            {item.invoiceId && <button onClick={() => void open(item.invoiceId!)}>Mở hóa đơn #{item.invoiceId}</button>}
-            {(item.state === 'OCR_REVIEW' || (item.documentType === 'PDF' && item.originalItemId && !item.invoiceId)) && <button onClick={() => setPdfItem(item.originalItemId || item.id)}>Xem / sửa dữ liệu PDF</button>}
-            {item.fileSize > 0 && item.state !== 'STORAGE_FAILED' && <a href={`/api/intake/items/${item.id}/file`} target="_blank" rel="noreferrer">Tải bản gốc</a>}
-            {session.invoiceCreate && limits && item.retryable && item.attempts < limits.maxAttempts && <button disabled={busy} onClick={() => void run(() => intakeApi.retry(result.session.id, item.id))}>Xử lý lại ({item.attempts}/{limits.maxAttempts})</button>}
+          <p className="text-sm text-slate-500">{item.message}</p>
+          <div className="flex flex-wrap items-center gap-3 text-xs">
+            {item.invoiceId && (
+              <button
+                onClick={() => void open(item.invoiceId!)}
+                className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs shadow-2xs transition"
+              >
+                Mở đối soát #{item.invoiceId}
+              </button>
+            )}
+            {(item.state === 'OCR_REVIEW' || (item.documentType === 'PDF' && item.originalItemId && !item.invoiceId)) && (
+              <button
+                onClick={() => setPdfItem(item.originalItemId || item.id)}
+                className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs shadow-2xs transition"
+              >
+                Kiểm tra & Tạo hóa đơn đối soát
+              </button>
+            )}
+            {item.fileSize > 0 && item.state !== 'STORAGE_FAILED' && (
+              <a
+                href={`/api/intake/items/${item.id}/file`}
+                target="_blank"
+                rel="noreferrer"
+                className="px-3 py-1.5 rounded-lg bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 font-medium text-xs transition"
+              >
+                Tải bản gốc
+              </a>
+            )}
+            {session.invoiceCreate && limits && item.retryable && item.attempts < limits.maxAttempts && (
+              <button
+                disabled={busy}
+                onClick={() => void run(() => intakeApi.retry(result.session.id, item.id))}
+                className="px-3 py-1.5 rounded-lg bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 font-medium text-xs transition disabled:opacity-50"
+              >
+                Xử lý lại ({item.attempts}/{limits.maxAttempts})
+              </button>
+            )}
           </div></li>)}</ul>
       </details>)}</div>
     </section>

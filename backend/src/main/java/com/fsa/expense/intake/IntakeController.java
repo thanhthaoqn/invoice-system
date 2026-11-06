@@ -36,6 +36,10 @@ public class IntakeController {
         if(draft.data()==null) throw new IllegalArgumentException("Thiếu dữ liệu PDF");
         return processor.savePdf(id,draft.version(),draft.data(),true);
     }
+    @PostMapping("/items/{id}/re-extract") public PdfDraft reExtract(@PathVariable Long id) throws com.fasterxml.jackson.core.JsonProcessingException {
+        IntakeItem item = processor.reExtractPdf(id);
+        return new PdfDraft(item.getVersion(), json.readValue(item.getDraftJson(), com.fsa.expense.dto.AiExtractionDto.class));
+    }
     @GetMapping("/limits") public IntakeLimits limits() { return limits; }
     @GetMapping("/sessions") public List<IntakeService.SessionResult> history() { return service.history(); }
     @GetMapping("/sessions/{id}") public IntakeService.SessionResult get(@PathVariable Long id) { return service.get(id); }

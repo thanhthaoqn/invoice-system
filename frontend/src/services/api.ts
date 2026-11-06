@@ -43,6 +43,7 @@ export const authApi = {
 };
 export const intakeApi = {
   pdfDraft: async (id: number) => (await axios.get<PdfDraft>(`/api/intake/items/${id}/draft`)).data,
+  reExtractPdf: async (id: number) => (await axios.post<PdfDraft>(`/api/intake/items/${id}/re-extract`)).data,
   savePdfDraft: async (id: number, draft: PdfDraft) => (await axios.put<PdfDraft>(`/api/intake/items/${id}/draft`, draft)).data,
   confirmPdf: async (id: number, draft: PdfDraft) => (await axios.post<IntakeItem>(`/api/intake/items/${id}/confirm`, draft)).data,
   limits: async () => (await axios.get<IntakeLimits>('/api/intake/limits')).data,
@@ -121,6 +122,10 @@ export interface ReviewInvoiceRequest {
   invoiceDate?: string;
   vendorName?: string;
   taxCode?: string;
+  buyerName?: string;
+  buyerTaxCode?: string;
+  buyerAddress?: string;
+  sellerAddress?: string;
   subtotalAmount?: number;
   vatAmount?: number;
   totalAmount?: number;

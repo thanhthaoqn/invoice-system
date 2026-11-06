@@ -58,6 +58,21 @@ public class IntakeProcessor {
             try {
                 var data=extraction.extractInvoice(new StoredPdf(bytes,baseName(item.getFileName())));
                 item.setRawExtraction(json.writeValueAsString(data)); item.setDraftJson(item.getRawExtraction());
+
+                // Chặn trùng danh tính ngay tại bước trích xuất nếu hóa đơn đã được tiếp nhận (từ XML hoặc PDF trước)
+                if (data.getTaxCode() != null && data.getInvoiceNumber() != null && data.getInvoiceSeries() != null) {
+                    String template = data.getInvoiceTemplate() != null ? data.getInvoiceTemplate() : (data.getInvoiceSeries().length() > 0 ? data.getInvoiceSeries().substring(0, 1) : "1");
+                    String identityKey = com.fsa.expense.service.AuditValidationService.computeSha256(
+                        (data.getTaxCode().trim() + "|" + template.trim() + "|" + data.getInvoiceSeries().trim() + "|" + data.getInvoiceNumber().trim())
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8)
+                    );
+                    var duplicate = invoices.findByTenantIdAndIdentityKey(tenant.getId(), identityKey);
+                    if (duplicate.isPresent()) {
+                        item.setInvoiceId(duplicate.get().getId());
+                        return finish(item, "DUPLICATE_IDENTITY", "Hóa đơn này đã được tiếp nhận trong hệ thống (" + duplicate.get().getFileType() + " #" + duplicate.get().getId() + "); không tạo bản trùng.");
+                    }
+                }
+
                 return finish(item,"OCR_REVIEW","Đã trích xuất PDF. Kiểm tra, bổ sung trường thiếu và xác nhận để tạo hóa đơn.");
             } catch (IllegalArgumentException | IllegalStateException e) {
                 return finish(item,"OCR_FAILED",e.getMessage());
@@ -114,6 +129,36 @@ public class IntakeProcessor {
             item.setConfirmedBy(TenantContext.username()); item.setConfirmedAt(Instant.now()); item.setConfirmedSnapshot(item.getDraftJson());
             return persist(item,tenant,invoice);
         } catch (com.fasterxml.jackson.core.JsonProcessingException e) { throw new IllegalArgumentException("Dữ liệu PDF không hợp lệ"); }
+    }
+    @Transactional(propagation=Propagation.REQUIRES_NEW)
+    public IntakeItem reExtractPdf(Long id) {
+        Tenant tenant = tenants.lockById(TenantContext.id()).orElseThrow();
+        IntakeItem item = items.findByIdAndTenantId(id, tenant.getId()).orElseThrow(() -> AuthService.error(404, "Không tìm thấy hồ sơ PDF"));
+        if (!"PDF".equals(item.getDocumentType())) throw AuthService.error(409, "Tài liệu không phải PDF");
+        try {
+            byte[] bytes = Files.readAllBytes(storage.getFilePath(item.getStoragePath()));
+            var data = extraction.extractInvoice(new StoredPdf(bytes, baseName(item.getFileName())));
+            item.setRawExtraction(json.writeValueAsString(data));
+            item.setDraftJson(item.getRawExtraction());
+
+            // Chặn trùng danh tính nếu hóa đơn đã được nạp
+            if (data.getTaxCode() != null && data.getInvoiceNumber() != null && data.getInvoiceSeries() != null) {
+                String template = data.getInvoiceTemplate() != null ? data.getInvoiceTemplate() : (data.getInvoiceSeries().length() > 0 ? data.getInvoiceSeries().substring(0, 1) : "1");
+                String identityKey = com.fsa.expense.service.AuditValidationService.computeSha256(
+                    (data.getTaxCode().trim() + "|" + template.trim() + "|" + data.getInvoiceSeries().trim() + "|" + data.getInvoiceNumber().trim())
+                    .getBytes(java.nio.charset.StandardCharsets.UTF_8)
+                );
+                var duplicate = invoices.findByTenantIdAndIdentityKey(tenant.getId(), identityKey);
+                if (duplicate.isPresent()) {
+                    item.setInvoiceId(duplicate.get().getId());
+                    return finish(item, "DUPLICATE_IDENTITY", "Hóa đơn này đã được tiếp nhận trong hệ thống (" + duplicate.get().getFileType() + " #" + duplicate.get().getId() + "); không tạo bản trùng.");
+                }
+            }
+
+            return finish(item, "OCR_REVIEW", "Đã trích xuất lại từ bản gốc PDF.");
+        } catch (Exception e) {
+            throw AuthService.error(500, "Lỗi khi trích xuất lại: " + e.getMessage());
+        }
     }
     private record StoredPdf(byte[] bytes,String filename) implements org.springframework.web.multipart.MultipartFile {
         public String getName(){return "file";} public String getOriginalFilename(){return filename;}

@@ -18,10 +18,17 @@ public class ReviewInvoiceRequest {
     private LocalDate invoiceDate;
     private String vendorName;
     private String taxCode;
+    private String buyerName;
+    private String buyerTaxCode;
+    private String buyerAddress;
+    private String sellerAddress;
     private BigDecimal subtotalAmount;
     private BigDecimal vatAmount;
     private BigDecimal totalAmount;
     private String category;
+    private String debitAccount;
+    private String vatAccount;
+    private String creditAccount;
     private InvoiceStatus status; // APPROVED or REJECTED
     private String reviewedBy;
     private String reason; // Lý do chỉnh sửa hoặc từ chối

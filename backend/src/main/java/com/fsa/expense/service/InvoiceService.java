@@ -200,10 +200,17 @@ public class InvoiceService {
         if (request.getInvoiceDate() != null) invoice.setInvoiceDate(request.getInvoiceDate());
         if (request.getVendorName() != null) invoice.setVendorName(request.getVendorName());
         if (request.getTaxCode() != null) invoice.setTaxCode(request.getTaxCode());
+        if (request.getBuyerName() != null) invoice.setBuyerName(request.getBuyerName());
+        if (request.getBuyerTaxCode() != null) invoice.setBuyerTaxCode(request.getBuyerTaxCode());
+        if (request.getBuyerAddress() != null) invoice.setBuyerAddress(request.getBuyerAddress());
+        if (request.getSellerAddress() != null) invoice.setSellerAddress(request.getSellerAddress());
         if (request.getSubtotalAmount() != null) invoice.setSubtotalAmount(request.getSubtotalAmount());
         if (request.getVatAmount() != null) invoice.setVatAmount(request.getVatAmount());
         if (request.getTotalAmount() != null) invoice.setTotalAmount(request.getTotalAmount());
         if (request.getCategory() != null) invoice.setCategory(request.getCategory());
+        if (request.getDebitAccount() != null) invoice.setDebitAccount(request.getDebitAccount());
+        if (request.getVatAccount() != null) invoice.setVatAccount(request.getVatAccount());
+        if (request.getCreditAccount() != null) invoice.setCreditAccount(request.getCreditAccount());
 
         // Update line items if provided
         if (request.getLineItems() != null && !request.getLineItems().isEmpty()) {
