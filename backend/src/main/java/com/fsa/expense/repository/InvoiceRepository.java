@@ -20,6 +20,7 @@ public interface InvoiceRepository extends JpaRepository<Invoice, Long> {
 
     Optional<Invoice> findByTenantIdAndContentHash(Long tenantId, String contentHash);
     Optional<Invoice> findByTenantIdAndIdentityKey(Long tenantId, String identityKey);
+    List<Invoice> findByTenantIdAndTaxCode(Long tenantId, String taxCode);
 
     @Override
     @Query("select i from Invoice i where i.tenantId = ?#{T(com.fsa.expense.auth.TenantContext).id()}")

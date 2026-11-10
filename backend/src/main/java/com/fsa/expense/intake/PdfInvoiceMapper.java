@@ -2,11 +2,9 @@ package com.fsa.expense.intake;
 
 import com.fsa.expense.dto.AiExtractionDto;
 import com.fsa.expense.entity.*;
-import com.fsa.expense.service.AuditValidationService;
 import org.springframework.stereotype.Component;
 import java.math.BigDecimal;
 import java.time.LocalDate;
-import java.nio.charset.StandardCharsets;
 
 @Component
 public class PdfInvoiceMapper {
@@ -54,8 +52,8 @@ public class PdfInvoiceMapper {
                     .lineNumber(invoice.getLineItems().size()+1).build());
             }
         }
-        String key=invoice.getTaxCode()+"|"+invoice.getInvoiceTemplate()+"|"+invoice.getInvoiceSeries()+"|"+invoice.getInvoiceNumber();
-        invoice.setIdentityKey(AuditValidationService.computeSha256(key.getBytes(StandardCharsets.UTF_8)));
+        invoice.setIdentityKey(InvoiceIdentity.hash(invoice.getTaxCode(), invoice.getInvoiceTemplate(),
+            invoice.getInvoiceSeries(), invoice.getInvoiceNumber()));
         return invoice;
     }
 }

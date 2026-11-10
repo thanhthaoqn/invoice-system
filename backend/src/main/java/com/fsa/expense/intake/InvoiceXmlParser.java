@@ -79,8 +79,8 @@ public class InvoiceXmlParser {
                     }
                 }
             }
-            String identity = invoice.getTaxCode() + "|" + invoice.getInvoiceTemplate() + "|" + invoice.getInvoiceSeries() + "|" + invoice.getInvoiceNumber();
-            invoice.setIdentityKey(com.fsa.expense.service.AuditValidationService.computeSha256(identity.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+            invoice.setIdentityKey(InvoiceIdentity.hash(invoice.getTaxCode(), invoice.getInvoiceTemplate(),
+                invoice.getInvoiceSeries(), invoice.getInvoiceNumber()));
             return invoice;
         } catch (Exception e) {
             if (e instanceof IllegalArgumentException) throw (IllegalArgumentException) e;

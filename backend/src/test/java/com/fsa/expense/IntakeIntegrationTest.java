@@ -346,4 +346,18 @@ class IntakeIntegrationTest {
         mvc.perform(get("/api/intake/items/"+id+"/draft").session(login.session())).andExpect(status().isNotFound());
         mvc.perform(post("/api/intake/items/"+id+"/confirm").session(login.session()).header("X-CSRF-Token",login.csrf()).contentType("application/json").content(data.toString())).andExpect(status().isNotFound());
     }
+    @Test void pdfAndXmlDedupNormalizesLeadingZeroesAndTemplatePrefixInSeries() throws Exception {
+        Login login=login();
+        var extracted=pdfData();
+        extracted.setInvoiceNumber("00091942");
+        extracted.setInvoiceSeries("1C26TAA");
+        org.mockito.Mockito.doReturn(extracted).when(extraction).extractInvoice(org.mockito.ArgumentMatchers.any());
+
+        JsonNode imported=upload(login,"original.xml",xml("91942","0300000001",a.getTaxCode()));
+        JsonNode pdf=upload(login,"representation.pdf","%PDF-1.7 representation-normalized".getBytes());
+
+        assertThat(pdf.at("/items/0/state").asText()).isEqualTo("DUPLICATE_IDENTITY");
+        assertThat(pdf.at("/items/0/invoiceId").asLong()).isEqualTo(imported.at("/items/0/invoiceId").asLong());
+        assertThat(jdbc.queryForObject("select count(*) from invoices",Long.class)).isEqualTo(1);
+    }
 }
