@@ -49,7 +49,7 @@ export const AnalyticsDashboard: React.FC = () => {
         <div>
           <h2 className="text-2xl font-extrabold text-slate-900 flex items-center space-x-2">
             <BarChart3 className="w-6 h-6 text-indigo-600" />
-            <span>Báo Cáo Kế Toán & Phân Tích Quyết Toán Chi Phí</span>
+            <span>Báo cáo kế toán</span>
           </h2>
           <p className="text-xs text-slate-500 mt-1">
             Tổng hợp ngân sách chi tiêu, thống kê nhà cung cấp và xuất file Excel chuẩn mực cho Kế toán trưởng

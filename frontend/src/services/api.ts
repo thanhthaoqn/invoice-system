@@ -2,6 +2,12 @@ import axios from 'axios';
 
 const API_BASE = '/api';
 
+export interface EmailMessage { id: number; sender: string; subject: string; state: string; sessionId: number | null; attempts: number; note: string; createdAt: string; updatedAt: string }
+export const emailApi = {
+  history: async () => (await axios.get<EmailMessage[]>('/api/emails')).data,
+  reprocess: async (id: number) => (await axios.post<EmailMessage>(`/api/emails/${id}/reprocess`)).data,
+};
+
 let csrfToken = '';
 axios.interceptors.request.use(config => {
   if (config.url?.startsWith('/api/') && config.method && !['get', 'head', 'options'].includes(config.method)) {

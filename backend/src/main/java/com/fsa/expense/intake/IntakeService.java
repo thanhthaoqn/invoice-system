@@ -45,10 +45,22 @@ public class IntakeService {
                 catch (IOException e) { record(session, name, null, false, "STORAGE_FAILED", "Không đọc được file tải lên"); continue; }
                 String lower=name.toLowerCase(Locale.ROOT);
                 if (lower.endsWith(".zip")) unpack(session, name, bytes, budget);
-                else if (lower.endsWith(".xml") || lower.endsWith(".pdf")) {
-                    IntakeItem item = record(session, name, bytes, lower.endsWith(".xml"), "RECEIVED", "Đã lưu bản gốc");
-                    process(item);
+                else if (looksLikeXml(bytes) || lower.endsWith(".xml") || lower.endsWith(".pdf")) {
+                    record(session, name, bytes, looksLikeXml(bytes) || lower.endsWith(".xml"), "RECEIVED", "Đã lưu bản gốc");
                 } else record(session, name, bytes, false, "UNSUPPORTED", "Chỉ nhận XML, PDF hoặc ZIP");
+            }
+            var documents=items.findBySessionIdAndTenantIdOrderById(session.getId(),session.getTenantId());
+            documents.stream().filter(IntakeItem::isXmlDocument).forEach(this::process);
+            var xmls=items.findBySessionIdAndTenantIdOrderById(session.getId(),session.getTenantId()).stream()
+                .filter(i -> i.isXmlDocument() && i.getInvoiceId()!=null).toList();
+            for(var pdf:documents) {
+                if(!"PDF".equals(pdf.getDocumentType()) || !"RECEIVED".equals(pdf.getState())) continue;
+                var matches=xmls.stream().filter(i -> stem(i.getFileName()).equalsIgnoreCase(stem(pdf.getFileName()))).toList();
+                IntakeItem match=matches.size()==1?matches.get(0):xmls.size()==1?xmls.get(0):null;
+                if(match!=null) {
+                    pdf.setInvoiceId(match.getInvoiceId()); pdf.setState("PDF_ATTACHED");
+                    pdf.setMessage("PDF hiển thị kèm hóa đơn XML; không chạy OCR"); items.save(pdf);
+                } else process(pdf);
             }
             session.setState("COMPLETED");
         } catch (RuntimeException e) {
@@ -83,9 +95,10 @@ public class IntakeService {
                 long compressed=entry.getCompressedSize();
                 if (size > Math.max(1L, compressed) * limits.getMaxCompressionRatio()) throw new IllegalArgumentException("Entry vượt tỉ lệ nén cho phép");
                 if (entry.isDirectory()) continue;
+                xml = xml || looksLikeXml(output.toByteArray());
                 if (xml || path.toLowerCase(Locale.ROOT).endsWith(".pdf")) {
                     xmlCount++;
-                    process(record(session, name+"/"+path, output.toByteArray(), xml, "RECEIVED", "Đã lưu tài liệu từ ZIP"));
+                    record(session, name+"/"+path, output.toByteArray(), xml, "RECEIVED", "Đã lưu tài liệu từ ZIP");
                 } else if (path.toLowerCase(Locale.ROOT).endsWith(".zip")) {
                     record(session, name+"/"+path, null, false, "UNSUPPORTED", "Không hỗ trợ ZIP lồng nhau; bản gốc nằm trong ZIP đã lưu");
                 }
@@ -146,4 +159,13 @@ public class IntakeService {
         return value.substring(0, Math.min(value.length(), 200));
     }
     private static class Budget { int entries; long expanded; }
+    private static String stem(String name) {
+        String base=name.replace('\\','/'); base=base.substring(base.lastIndexOf('/')+1);
+        int dot=base.lastIndexOf('.'); return dot<0?base:base.substring(0,dot);
+    }
+    static boolean looksLikeXml(byte[] bytes) {
+        int offset=bytes.length>=3 && (bytes[0]&255)==239 && (bytes[1]&255)==187 && (bytes[2]&255)==191?3:0;
+        while(offset<bytes.length && (bytes[offset]==' ' || bytes[offset]=='\n' || bytes[offset]=='\r' || bytes[offset]=='\t')) offset++;
+        return offset<bytes.length && bytes[offset]=='<';
+    }
 }

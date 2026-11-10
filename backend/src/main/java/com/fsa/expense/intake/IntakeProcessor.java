@@ -22,12 +22,17 @@ public class IntakeProcessor {
     private final AiExtractionClient extraction;
     private final PdfInvoiceMapper pdfMapper;
     private final com.fasterxml.jackson.databind.ObjectMapper json;
+    private final com.fsa.expense.email.TenantAliasRepository aliases;
+    private final com.fsa.expense.email.EmailMessageRepository emails;
     public IntakeProcessor(IntakeItemRepository items, IntakeAttemptRepository attempts, TenantRepository tenants,
             InvoiceRepository invoices, InvoiceXmlParser parser, FileStorageService storage, AuditValidationService audit, IntakeLimits limits,
-            AiExtractionClient extraction, PdfInvoiceMapper pdfMapper, com.fasterxml.jackson.databind.ObjectMapper json) {
+            AiExtractionClient extraction, PdfInvoiceMapper pdfMapper, com.fasterxml.jackson.databind.ObjectMapper json,
+            com.fsa.expense.email.TenantAliasRepository aliases,com.fsa.expense.email.EmailMessageRepository emails) {
         this.items=items; this.attempts=attempts; this.tenants=tenants; this.invoices=invoices;
         this.parser=parser; this.storage=storage; this.audit=audit; this.limits=limits;
         this.extraction=extraction; this.pdfMapper=pdfMapper; this.json=json;
+        this.aliases=aliases;
+        this.emails=emails;
     }
     @Transactional(propagation=Propagation.REQUIRES_NEW)
     public IntakeItem process(Long id, boolean retry) {
@@ -87,6 +92,10 @@ public class IntakeProcessor {
     }
     private IntakeItem persist(IntakeItem item,Tenant tenant,Invoice invoice) {
         if (tenant.getTaxCode().equals(invoice.getTaxCode())) return finish(item, "REJECTED_OUTBOUND", "Đây là hóa đơn đầu ra của doanh nghiệp");
+        var request=((org.springframework.web.context.request.ServletRequestAttributes)org.springframework.web.context.request.RequestContextHolder.currentRequestAttributes()).getRequest();
+        if((Boolean.TRUE.equals(request.getAttribute("emailIntake")) || emails.existsByTenantIdAndSessionId(tenant.getId(),item.getSessionId())) && !tenant.getTaxCode().equals(invoice.getBuyerTaxCode())
+                && !aliases.existsByTenantIdAndTaxCode(tenant.getId(),invoice.getBuyerTaxCode()))
+            return finish(item,"REJECTED_ROUTING","MST người mua không thuộc doanh nghiệp hoặc chi nhánh phụ thuộc");
         var duplicate = invoices.findByTenantIdAndIdentityKey(tenant.getId(), invoice.getIdentityKey());
         if (duplicate.isPresent()) {
             item.setInvoiceId(duplicate.get().getId());

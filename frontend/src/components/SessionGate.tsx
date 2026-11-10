@@ -1,8 +1,16 @@
 import { useEffect, useState, type ReactNode, type FormEvent } from 'react';
 import { authApi, errorMessage, type Session } from '../services/api';
-import { Building2, LogOut, UserRound } from 'lucide-react';
+import { Building2, LogOut, UserRound, FileSpreadsheet, ChevronLeft, ChevronRight } from 'lucide-react';
 
-export function SessionGate({ children }: { children: (session: Session) => ReactNode }) {
+export function SessionGate({ children }: { children: (session: Session, collapsed: boolean) => ReactNode }) {
+  const [collapsed, setCollapsed] = useState(() => {
+    try { return localStorage.getItem('smartexpense.sidebar-collapsed') === 'true'; } catch { return false; }
+  });
+  const toggleSidebar = () => setCollapsed(previous => {
+    const next = !previous;
+    try { localStorage.setItem('smartexpense.sidebar-collapsed', String(next)); } catch { /* Layout still works without storage. */ }
+    return next;
+  });
   const [session, setSession] = useState<Session | null>(null);
   const [ready, setReady] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -44,8 +52,18 @@ export function SessionGate({ children }: { children: (session: Session) => Reac
     </form>
   </main>;
   return <>
-    <div className="border-b border-slate-200 bg-slate-50">
-      <div className="max-w-[1700px] mx-auto flex flex-wrap items-center justify-between gap-x-6 gap-y-3 px-4 sm:px-6 lg:px-8 py-2.5">
+    <header className="flex border-b border-slate-200 bg-white">
+      <div className={`sidebar-rail relative flex shrink-0 items-center border-r border-slate-200 px-4 py-4 ${collapsed ? 'is-collapsed' : ''}`}>
+        <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-indigo-600 text-white shadow-sm shadow-indigo-200"><FileSpreadsheet className="h-6 w-6" strokeWidth={1.8} /></span>
+        <span className="sidebar-label ml-3 min-w-0 overflow-hidden whitespace-nowrap">
+          <span className="block text-xl font-bold tracking-tight text-slate-900">SmartExpense</span>
+          <span className="mt-0.5 block text-[11px] text-slate-500">Quản lý hóa đơn & chi phí</span>
+        </span>
+        <button onClick={toggleSidebar} aria-label={collapsed ? 'Mở rộng thanh điều hướng' : 'Thu gọn thanh điều hướng'} aria-expanded={!collapsed} aria-controls="workspace-navigation" title={collapsed ? 'Mở rộng menu' : 'Thu gọn menu'} className="absolute -right-3.5 top-1/2 z-50 hidden h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 shadow-sm transition-colors hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-600 focus-visible:outline-2 focus-visible:outline-indigo-500 md:flex">
+          {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+        </button>
+      </div>
+      <div className="min-w-0 flex-1 flex flex-wrap items-center justify-between gap-x-6 gap-y-3 px-4 sm:px-6 lg:px-8 py-2.5">
         <label className="flex min-w-0 max-w-full items-center gap-2.5 text-xs font-medium text-slate-500">
           <Building2 className="w-4 h-4 shrink-0 text-slate-400" />
           <span className="hidden sm:inline shrink-0">Doanh nghiệp</span>
@@ -61,7 +79,7 @@ export function SessionGate({ children }: { children: (session: Session) => Reac
         </div>
         {error && <p role="alert" className="w-full text-sm text-rose-700">{error}</p>}
       </div>
-    </div>
-    {session.tenantId ? children(session) : <p className="text-center p-16">Chọn doanh nghiệp để tiếp tục. Phiên này chưa được phép truy cập hóa đơn.</p>}
+    </header>
+    {session.tenantId ? children(session, collapsed) : <p className="text-center p-16">Chọn doanh nghiệp để tiếp tục. Phiên này chưa được phép truy cập hóa đơn.</p>}
   </>;
 }

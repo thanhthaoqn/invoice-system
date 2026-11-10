@@ -1,5 +1,35 @@
 @import "tailwindcss";
 
+.sidebar-rail {
+  width: 18rem;
+  transition: width 280ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.sidebar-label {
+  opacity: 1;
+  transform: translateX(0);
+  transition: opacity 160ms ease, transform 240ms ease;
+}
+
+.sidebar-rail.is-collapsed { width: 5rem; }
+.sidebar-rail.is-collapsed .sidebar-label {
+  width: 0;
+  margin-left: 0;
+  opacity: 0;
+  transform: translateX(-10px);
+  overflow: hidden;
+  pointer-events: none;
+}
+
+@media (max-width: 767px) {
+  .sidebar-rail { width: 5rem; }
+  .sidebar-label { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-rail, .sidebar-label { transition: none; }
+}
+
 body {
   background-color: #f8fafc;
   color: #0f172a;

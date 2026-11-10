@@ -34,3 +34,6 @@ backend/uploads/invoices/*
 *.iml
 .DS_Store
 Thumbs.db
+
+# Local runtime configuration and manual test artifacts
+.local/

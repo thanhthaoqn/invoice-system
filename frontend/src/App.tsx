@@ -5,11 +5,13 @@ import { SplitScreenReview } from './components/SplitScreenReview';
 import { AnalyticsDashboard } from './components/AnalyticsDashboard';
 import { ErrorLogViewer } from './components/ErrorLogViewer';
 import { SessionGate } from './components/SessionGate';
+import { InvoiceList } from './components/InvoiceList';
+import { EmailInbox } from './components/EmailInbox';
 import type { Session } from './services/api';
 import { api, type Invoice } from './services/api';
 
-const Workspace: React.FC<{ session: Session }> = ({ session }) => {
-  const [activeTab, setActiveTab] = useState<'upload' | 'review' | 'analytics' | 'logs'>('upload');
+const Workspace: React.FC<{ session: Session; collapsed: boolean }> = ({ session, collapsed }) => {
+  const [activeTab, setActiveTab] = useState<'upload' | 'review' | 'analytics' | 'logs' | 'invoices' | 'emails'>('analytics');
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [loading, setLoading] = useState(false);
@@ -54,14 +56,17 @@ const Workspace: React.FC<{ session: Session }> = ({ session }) => {
   const pendingCount = invoices.filter((i) => i.status === 'PENDING_REVIEW').length;
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col selection:bg-indigo-600 selection:text-white">
+    <div className="min-h-[calc(100dvh-4rem)] bg-slate-50 text-slate-900 flex items-start selection:bg-indigo-600 selection:text-white">
       <Navbar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         pendingCount={pendingCount}
+        collapsed={collapsed}
       />
 
-      <main className="flex-1 px-4 sm:px-6 lg:px-8">
+      <main className="min-w-0 flex-1 px-3 sm:px-6 lg:px-8">
+        {activeTab === 'invoices' && <InvoiceList session={session} invoices={invoices} isLoading={loading} onRefresh={fetchInvoices} onSelectInvoiceForReview={handleSelectInvoiceForReview} />}
+        {activeTab === 'emails' && <EmailInbox canCreate={session.invoiceCreate} onChanged={fetchInvoices} />}
         {activeTab === 'upload' && (
           <UploadSection
             session={session}
@@ -77,7 +82,7 @@ const Workspace: React.FC<{ session: Session }> = ({ session }) => {
           selectedInvoice ? (
             <SplitScreenReview
               invoice={selectedInvoice}
-              onBack={() => setActiveTab('upload')}
+              onBack={() => setActiveTab('invoices')}
               onReviewed={handleReviewed}
               canReview={session.invoiceReview}
             />
@@ -102,6 +107,6 @@ const Workspace: React.FC<{ session: Session }> = ({ session }) => {
   );
 };
 
-export const App = () => <SessionGate>{session => <Workspace key={session.tenantId} session={session} />}</SessionGate>;
+export const App = () => <SessionGate>{(session, collapsed) => <Workspace key={session.tenantId} session={session} collapsed={collapsed} />}</SessionGate>;
 
 export default App;

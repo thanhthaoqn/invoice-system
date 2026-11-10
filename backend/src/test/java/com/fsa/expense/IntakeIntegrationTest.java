@@ -37,6 +37,8 @@ class IntakeIntegrationTest {
     @Autowired ErrorLogRepository errors;
     @Autowired IntakeLimits limits;
     @Autowired InvoiceXmlParser parser;
+    @Autowired com.fsa.expense.email.EmailIntakeService emailIntake;
+    @Autowired com.fsa.expense.email.EmailMessageRepository emailMessages;
     @Autowired org.springframework.jdbc.core.JdbcTemplate jdbc;
     @SpyBean com.fsa.expense.service.FileStorageService storage;
     @SpyBean com.fsa.expense.service.AuditValidationService audit;
@@ -48,7 +50,7 @@ class IntakeIntegrationTest {
     Tenant a; Tenant b; AppUser user;
     record Login(MockHttpSession session, String csrf) {}
     @BeforeEach void setup() {
-        errors.deleteAll(); invoices.deleteAll(); attempts.deleteAll(); items.deleteAll(); sessions.deleteAll(); memberships.deleteAll(); users.deleteAll(); tenants.deleteAll();
+        emailMessages.deleteAll(); errors.deleteAll(); invoices.deleteAll(); attempts.deleteAll(); items.deleteAll(); sessions.deleteAll(); memberships.deleteAll(); users.deleteAll(); tenants.deleteAll();
         a=tenant("Công ty A", "0100000001"); b=tenant("Công ty B", "0100000002");
         user=new AppUser(); user.setUsername("accountant"); user.setPasswordHash(Passwords.hash(PASSWORD)); users.save(user);
         member(a, true); limits.setMaxEntries(200); limits.setMaxExpandedBytes(50*1024*1024); limits.setMaxCompressionRatio(100); limits.setMaxFileBytes(15*1024*1024); limits.setMaxAttempts(3);
@@ -72,6 +74,70 @@ class IntakeIntegrationTest {
         var bytes=new ByteArrayOutputStream();
         try(var zip=new ZipOutputStream(bytes)) { for(int i=0;i<names.length;i++) { zip.putNextEntry(new ZipEntry(names[i])); zip.write(contents[i]); zip.closeEntry(); } }
         return bytes.toByteArray();
+    }
+    @Test void emailRetainsOriginalAndDeduplicatesMessage() throws Exception {
+        var request=new MockHttpServletRequest(); request.setAttribute("tenantId",a.getId());request.setAttribute("username","email-test");
+        org.springframework.web.context.request.RequestContextHolder.setRequestAttributes(new org.springframework.web.context.request.ServletRequestAttributes(request));
+        try {
+            var payload=new com.fsa.expense.email.EmailPayload("<message-1>","vendor@example.com","Invoice",null,
+                java.util.List.of(new com.fsa.expense.email.EmailPayload.Attachment("invoice.xml",xml("email-1","0300000001",a.getTaxCode()))));
+            var first=emailIntake.receive(payload);
+            assertThat(first.getState()).isEqualTo("SUCCESS");
+            assertThat(emailIntake.receive(payload).getId()).isEqualTo(first.getId());
+            assertThat(emailMessages.count()).isEqualTo(1);
+            assertThat(invoices.count()).isEqualTo(1);
+        } finally {org.springframework.web.context.request.RequestContextHolder.resetRequestAttributes();}
+    }
+    @Test void emailStorageFailureDoesNotCommitClaim() {
+        var request=new MockHttpServletRequest(); request.setAttribute("tenantId",a.getId());request.setAttribute("username","email-test");
+        org.springframework.web.context.request.RequestContextHolder.setRequestAttributes(new org.springframework.web.context.request.ServletRequestAttributes(request));
+        org.mockito.Mockito.doThrow(new IllegalStateException("disk unavailable")).when(storage).storeBytes(org.mockito.ArgumentMatchers.any());
+        try {
+            var payload=new com.fsa.expense.email.EmailPayload("<message-2>","vendor@example.com","Invoice",null,java.util.List.of());
+            assertThatThrownBy(() -> emailIntake.receive(payload)).isInstanceOf(IllegalStateException.class);
+            assertThat(emailMessages.count()).isZero();
+        } finally {org.mockito.Mockito.reset(storage);org.springframework.web.context.request.RequestContextHolder.resetRequestAttributes();}
+    }
+    @Test void webhookIsDisabledWithoutSecret() throws Exception {
+        mvc.perform(post("/emails/webhook").contentType("application/json").content("{\"sender\":\"vendor@example.com\",\"subject\":\"invoice\",\"attachments\":[]}"))
+            .andExpect(status().isUnauthorized());
+    }
+    @Test void emailReprocessReadsRetainedBytesAndKeepsPartialInvoicesExactlyOnce() throws Exception {
+        var request=new MockHttpServletRequest(); request.setAttribute("tenantId",a.getId());request.setAttribute("username","email-test");
+        org.springframework.web.context.request.RequestContextHolder.setRequestAttributes(new org.springframework.web.context.request.ServletRequestAttributes(request));
+        try {
+            var payload=new com.fsa.expense.email.EmailPayload("<partial>","vendor@example.com","Batch",null,java.util.List.of(
+                new com.fsa.expense.email.EmailPayload.Attachment("good.xml",xml("email-good","0300000001",a.getTaxCode())),
+                new com.fsa.expense.email.EmailPayload.Attachment("bad.xml","<broken>".getBytes())));
+            var first=emailIntake.receive(payload);
+            assertThat(first.getState()).isEqualTo("PARTIAL");
+            var retried=emailIntake.retry(first.getId());
+            assertThat(retried.getState()).isEqualTo("PARTIAL");
+            assertThat(retried.getAttempts()).isEqualTo(2);
+            assertThat(invoices.count()).isEqualTo(1);
+        } finally {org.springframework.web.context.request.RequestContextHolder.resetRequestAttributes();}
+    }
+    @Test void emailRejectsBuyerMismatch() {
+        var request=new MockHttpServletRequest(); request.setAttribute("tenantId",a.getId());request.setAttribute("username","email-test");
+        org.springframework.web.context.request.RequestContextHolder.setRequestAttributes(new org.springframework.web.context.request.ServletRequestAttributes(request));
+        try {
+            var payload=new com.fsa.expense.email.EmailPayload("<wrong-buyer>","vendor@example.com","Invoice",null,
+                java.util.List.of(new com.fsa.expense.email.EmailPayload.Attachment("invoice.xml",xml("wrong-buyer","0300000001",b.getTaxCode()))));
+            assertThat(emailIntake.receive(payload).getState()).isEqualTo("FAILED");
+            assertThat(invoices.count()).isZero();
+            assertThat(items.findAll()).extracting(IntakeItem::getState).containsExactly("REJECTED_ROUTING");
+        } finally {org.springframework.web.context.request.RequestContextHolder.resetRequestAttributes();}
+    }
+    @Test void xmlMagicBytesAndPdfPairAvoidOcr() throws Exception {
+        Login login=login();
+        var response=mvc.perform(multipart("/api/intake/sessions")
+            .file(new MockMultipartFile("files","invoice.pdf","application/pdf","%PDF-fake".getBytes()))
+            .file(new MockMultipartFile("files","invoice.dat","application/octet-stream",xml("magic","0300000001",a.getTaxCode())))
+            .session(login.session()).header("X-CSRF-Token",login.csrf())).andExpect(status().isOk()).andReturn();
+        var result=json.readTree(response.getResponse().getContentAsString());
+        assertThat(result.at("/items/0/state").asText()).isEqualTo("PDF_ATTACHED");
+        assertThat(result.at("/items/1/state").asText()).isEqualTo("INGESTED");
+        org.mockito.Mockito.verify(extraction,org.mockito.Mockito.never()).extractInvoice(org.mockito.ArgumentMatchers.any());
     }
     @Test void malformedXmlKeepsSourceWithoutCreatingInvoice() throws Exception {
         Login login=login(); JsonNode result=upload(login,"broken.xml", "<HDon>".getBytes());

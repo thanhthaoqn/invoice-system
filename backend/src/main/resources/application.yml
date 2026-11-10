@@ -29,6 +29,10 @@ spring:
       max-request-size: 25MB
 
 app:
+  email:
+    webhook-secret: ${EMAIL_WEBHOOK_SECRET:}
+    tenant-id: ${EMAIL_TENANT_ID:0}
+    allowed-senders: ${EMAIL_ALLOWED_SENDERS:}
   intake:
     max-files: 20
     max-file-bytes: 15728640
