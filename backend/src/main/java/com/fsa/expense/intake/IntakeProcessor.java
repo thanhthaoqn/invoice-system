@@ -81,13 +81,8 @@ public class IntakeProcessor {
                 item.setRawExtraction(json.writeValueAsString(data)); item.setDraftJson(item.getRawExtraction());
 
                 // Chặn trùng danh tính ngay tại bước trích xuất nếu hóa đơn đã được tiếp nhận (từ XML hoặc PDF trước)
-                if (data.getTaxCode() != null && data.getInvoiceNumber() != null && data.getInvoiceSeries() != null) {
-                    String template = data.getInvoiceTemplate() != null ? data.getInvoiceTemplate() : (data.getInvoiceSeries().length() > 0 ? data.getInvoiceSeries().substring(0, 1) : "1");
-                    String identityKey = com.fsa.expense.service.AuditValidationService.computeSha256(
-                        (data.getTaxCode().trim() + "|" + template.trim() + "|" + data.getInvoiceSeries().trim() + "|" + data.getInvoiceNumber().trim())
-                        .getBytes(java.nio.charset.StandardCharsets.UTF_8)
-                    );
-                    var duplicate = invoices.findByTenantIdAndIdentityKey(tenant.getId(), identityKey);
+                if (InvoiceIdentity.key(data.getTaxCode(), data.getInvoiceSeries(), data.getInvoiceNumber()) != null) {
+                    var duplicate = findDuplicate(data.getTaxCode(), data.getInvoiceSeries(), data.getInvoiceNumber());
                     if (duplicate.isPresent()) {
                         item.setInvoiceId(duplicate.get().getId());
                         return finish(item, "DUPLICATE_IDENTITY", "Hóa đơn này đã được tiếp nhận trong hệ thống (" + duplicate.get().getFileType() + " #" + duplicate.get().getId() + "); không tạo bản trùng.");
@@ -112,10 +107,10 @@ public class IntakeProcessor {
         if(emailSource && !tenant.getTaxCode().equals(invoice.getBuyerTaxCode())
                 && !aliases.existsByTenantIdAndTaxCode(tenant.getId(),invoice.getBuyerTaxCode()))
             return finish(item,"REJECTED_ROUTING","MST người mua không thuộc doanh nghiệp hoặc chi nhánh phụ thuộc");
-        var duplicate = invoices.findByTenantIdAndIdentityKey(tenant.getId(), invoice.getIdentityKey());
+        var duplicate = findDuplicate(invoice.getTaxCode(), invoice.getInvoiceSeries(), invoice.getInvoiceNumber());
         if (duplicate.isPresent()) {
             item.setInvoiceId(duplicate.get().getId());
-            return finish(item, "DUPLICATE_IDENTITY", "Khác nội dung nhưng trùng MST bán, mẫu số, ký hiệu và số hóa đơn");
+            return finish(item, "DUPLICATE_IDENTITY", "Trùng lặp: MST người bán, ký hiệu và số hóa đơn đã tồn tại; không tạo mới, không tính tiền lần hai");
         }
         if(emailSource && !quota.consume(tenant.getId()))return finish(item,"QUOTA_EXCEEDED","Vượt hạn mức hóa đơn email trong tháng; bản gốc được giữ để xử lý lại");
         invoice.setTenantId(tenant.getId()); invoice.setContentHash(item.getContentHash());
@@ -170,13 +165,8 @@ public class IntakeProcessor {
             item.setDraftJson(item.getRawExtraction());
 
             // Chặn trùng danh tính nếu hóa đơn đã được nạp
-            if (data.getTaxCode() != null && data.getInvoiceNumber() != null && data.getInvoiceSeries() != null) {
-                String template = data.getInvoiceTemplate() != null ? data.getInvoiceTemplate() : (data.getInvoiceSeries().length() > 0 ? data.getInvoiceSeries().substring(0, 1) : "1");
-                String identityKey = com.fsa.expense.service.AuditValidationService.computeSha256(
-                    (data.getTaxCode().trim() + "|" + template.trim() + "|" + data.getInvoiceSeries().trim() + "|" + data.getInvoiceNumber().trim())
-                    .getBytes(java.nio.charset.StandardCharsets.UTF_8)
-                );
-                var duplicate = invoices.findByTenantIdAndIdentityKey(tenant.getId(), identityKey);
+            if (InvoiceIdentity.key(data.getTaxCode(), data.getInvoiceSeries(), data.getInvoiceNumber()) != null) {
+                var duplicate = findDuplicate(data.getTaxCode(), data.getInvoiceSeries(), data.getInvoiceNumber());
                 if (duplicate.isPresent()) {
                     item.setInvoiceId(duplicate.get().getId());
                     return finish(item, "DUPLICATE_IDENTITY", "Hóa đơn này đã được tiếp nhận trong hệ thống (" + duplicate.get().getFileType() + " #" + duplicate.get().getId() + "); không tạo bản trùng.");
@@ -187,6 +177,10 @@ public class IntakeProcessor {
         } catch (Exception e) {
             throw AuthService.error(500, "Lỗi khi trích xuất lại: " + e.getMessage());
         }
+    }
+    private java.util.Optional<Invoice> findDuplicate(String tax, String series, String number) {
+        // Compare fields too: older invoices still carry the previous four-field hash.
+        return invoices.findPotentialDuplicates(number, tax, series, null).stream().findFirst();
     }
     private record StoredPdf(byte[] bytes,String filename) implements org.springframework.web.multipart.MultipartFile {
         public String getName(){return "file";} public String getOriginalFilename(){return filename;}

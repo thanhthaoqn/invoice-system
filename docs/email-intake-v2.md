@@ -111,6 +111,37 @@ hóa sender/attachments trước khi chuyển tiếp. Webhook hiện cấu hình
   bật. Không thêm ShedLock vì lease hiện có đảm nhiệm cùng chức năng trong
   kiến trúc PostgreSQL này. Khi bật Redis mà Redis lỗi, thao tác không tiếp tục.
 
+## Chống nhập trùng PDF / XML / email
+
+Trong cùng doanh nghiệp, đối chiếu **MST người bán + Ký hiệu + Số hóa đơn**.
+Bỏ khoảng trắng đầu/cuối và không phân biệt hoa thường; mẫu số không tham gia
+khóa. Không suy đoán danh tính khi thiếu một trong ba trường.
+
+- File giống hệt đã nhập: `ALREADY_RECEIVED`.
+- Nội dung hoặc định dạng khác nhưng trùng ba trường: `DUPLICATE_IDENTITY`.
+  Giữ tài liệu gốc và liên kết tới hóa đơn đã có; không tạo hóa đơn thứ hai,
+  không trừ quota thêm và không cộng tiền lần hai.
+- PDF được kiểm tra sau OCR, khi trích xuất lại và ngay trước xác nhận. Nếu XML
+  được nhập trong lúc PDF chờ đối soát, xác nhận PDF sẽ báo trùng lặp.
+- Đối chiếu cả dữ liệu cũ dùng khóa có mẫu số. Duyệt hóa đơn kiểm tra lại danh
+  tính và trả HTTP 409 khi trùng; nhập/xác nhận/duyệt khóa theo doanh nghiệp.
+- Cùng số nhưng khác ký hiệu, MST bán hoặc doanh nghiệp nhận không bị coi là
+  trùng. Không tự gộp/xóa bản ghi lịch sử đã có trước thay đổi.
+
+Test tay: nhập XML, sau đó gửi PDF cùng ba trường qua email và thử thứ tự ngược
+lại. Trong **Xem tài liệu**, bản sau hiển thị trùng lặp và mở về hóa đơn ban đầu.
+Danh sách chỉ có một hóa đơn; duyệt bản đó rồi kiểm tra tổng chi tăng một lần.
+Đổi riêng ký hiệu để kiểm tra vẫn nhận hóa đơn mới.
+
+## Xuất bảng kê chi phí Excel
+
+Nút **Xuất Excel hóa đơn đã duyệt** chỉ lấy hóa đơn `APPROVED` của doanh nghiệp
+đang chọn, gồm cả hóa đơn nhận từ email. Hóa đơn đang xử lý, chờ đối soát hoặc
+bị từ chối không xuất hiện và không được cộng vào tổng tiền. Tổng thanh toán
+trong file tương ứng với tổng chi tiêu đã duyệt trên dashboard tại thời điểm xuất.
+Chưa có hóa đơn đã duyệt thì vẫn tải được file với thông báo và tổng tiền bằng 0.
+Sau khi duyệt hoặc đổi trạng thái hóa đơn, tải file mới để nhận dữ liệu mới nhất.
+
 ## PDF bất đồng bộ
 
 Khi `EMAIL_OCR_ASYNC_ENABLED=true`, PDF email không ghép được với XML tạo

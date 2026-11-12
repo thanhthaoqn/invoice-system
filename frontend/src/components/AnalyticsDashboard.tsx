@@ -52,7 +52,7 @@ export const AnalyticsDashboard: React.FC = () => {
             <span>Báo cáo kế toán</span>
           </h2>
           <p className="text-xs text-slate-500 mt-1">
-            Tổng hợp ngân sách chi tiêu, thống kê nhà cung cấp và xuất file Excel chuẩn mực cho Kế toán trưởng
+            Bảng kê Excel và tổng chi tiêu chỉ bao gồm hóa đơn đã duyệt.
           </p>
         </div>
 
@@ -70,7 +70,7 @@ export const AnalyticsDashboard: React.FC = () => {
             className="flex items-center space-x-2 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-md shadow-emerald-600/25 hover:scale-[1.02] active:scale-[0.98] transition-all"
           >
             <FileSpreadsheet className="w-4 h-4" />
-            <span>Xuất Excel "Bảng Kê Chi Phí"</span>
+            <span>Xuất Excel hóa đơn đã duyệt</span>
           </button>
         </div>
       </div>

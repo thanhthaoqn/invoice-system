@@ -2,11 +2,11 @@ import { useEffect, useState } from 'react';
 import { Mail, RefreshCw } from 'lucide-react';
 import { EmailSettings } from './EmailSettings';
 import { EmailDocuments } from './EmailDocuments';
-import { emailApi, errorMessage, type EmailMessage } from '../services/api';
+import { emailApi, errorMessage, type EmailMessage, type Invoice } from '../services/api';
 
 const states: Record<string, string> = { SUCCESS: 'Thành công', PARTIAL: 'Thành công một phần', FAILED: 'Thất bại', PAUSE: 'Chờ thử lại', NO_XML: 'Không có hóa đơn', NEEDS_REVIEW: 'Chờ đối soát PDF', RECEIVED: 'Đã tiếp nhận', REJECTED_SENDER: 'Từ chối người gửi' };
 
-export function EmailInbox({ canCreate, onChanged }: { canCreate: boolean; onChanged: () => void }) {
+export function EmailInbox({ canCreate, onChanged, onOpenInvoice }: { canCreate: boolean; onChanged: () => void; onOpenInvoice: (invoice: Invoice) => void }) {
   const [messages, setMessages] = useState<EmailMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<number | null>(null);
@@ -52,6 +52,6 @@ export function EmailInbox({ canCreate, onChanged }: { canCreate: boolean; onCha
             <td className="space-y-2 p-4">{message.sessionId && <button onClick={() => setSelectedSession(message.sessionId)} className="block whitespace-nowrap text-xs font-semibold text-indigo-700">Xem tài liệu</button>}{canCreate && (['FAILED', 'PARTIAL', 'PAUSE', 'REJECTED_SENDER'].includes(message.state) || (message.state === 'RECEIVED' && Date.now() - new Date(message.updatedAt).getTime() > 900000)) && <button disabled={busy !== null} onClick={() => void retry(message.id)} className="whitespace-nowrap rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">{busy === message.id ? 'Đang xử lý…' : 'Xử lý lại'}</button>}</td>
           </tr>)}</tbody></table></div>}
     </section>
-    {selectedSession !== null && <EmailDocuments key={selectedSession} sessionId={selectedSession} canEdit={canCreate} onChanged={onChanged} onClose={() => setSelectedSession(null)} />}
+    {selectedSession !== null && <EmailDocuments key={selectedSession} sessionId={selectedSession} canEdit={canCreate} onChanged={onChanged} onClose={() => setSelectedSession(null)} onOpenInvoice={onOpenInvoice} />}
   </div>;
 }

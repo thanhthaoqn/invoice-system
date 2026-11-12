@@ -80,8 +80,7 @@ public class InvoiceXmlParser {
                     }
                 }
             }
-            String identity = invoice.getTaxCode() + "|" + invoice.getInvoiceTemplate() + "|" + invoice.getInvoiceSeries() + "|" + invoice.getInvoiceNumber();
-            invoice.setIdentityKey(com.fsa.expense.service.AuditValidationService.computeSha256(identity.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+            invoice.setIdentityKey(com.fsa.expense.service.InvoiceIdentity.key(invoice.getTaxCode(), invoice.getInvoiceSeries(), invoice.getInvoiceNumber()));
             invoice.setSignatureState(signatureState(root));
             return invoice;
         } catch (Exception e) {

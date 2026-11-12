@@ -338,12 +338,116 @@ class IntakeIntegrationTest {
     @Test void pdfAndXmlIdentityDedupAndCrossTenantProtection() throws Exception {
         Login login=login(); org.mockito.Mockito.doReturn(pdfData()).when(extraction).extractInvoice(org.mockito.ArgumentMatchers.any());
         JsonNode imported=upload(login,"original.xml",xml("00099","0300000001",a.getTaxCode()));
-        long id=upload(login,"representation.pdf","%PDF-1.7 representation".getBytes()).at("/items/0/id").asLong();
+        JsonNode duplicate=upload(login,"representation.pdf","%PDF-1.7 representation".getBytes());
+        long id=duplicate.at("/items/0/id").asLong();
+        assertThat(duplicate.at("/items/0/state").asText()).isEqualTo("DUPLICATE_IDENTITY");
+        assertThat(duplicate.at("/items/0/invoiceId").asLong()).isEqualTo(imported.at("/items/0/invoiceId").asLong());
         JsonNode data=draft(login,id);
-        mvc.perform(post("/api/intake/items/"+id+"/confirm").session(login.session()).header("X-CSRF-Token",login.csrf()).contentType("application/json").content(data.toString()))
-            .andExpect(status().isOk()).andExpect(jsonPath("$.state").value("DUPLICATE_IDENTITY")).andExpect(jsonPath("$.invoiceId").value(imported.at("/items/0/invoiceId").asInt()));
+        assertThat(jdbc.queryForObject("select count(*) from invoices",Long.class)).isEqualTo(1);
         member(b,true); login.session().setAttribute("tenantId",b.getId());
         mvc.perform(get("/api/intake/items/"+id+"/draft").session(login.session())).andExpect(status().isNotFound());
         mvc.perform(post("/api/intake/items/"+id+"/confirm").session(login.session()).header("X-CSRF-Token",login.csrf()).contentType("application/json").content(data.toString())).andExpect(status().isNotFound());
     }
+    @Test void pdfFirstThenXmlWithDifferentTemplateIsDuplicateAndOnlyCountsOnce() throws Exception {
+        Login login=login();
+        var extracted=pdfData(); extracted.setInvoiceTemplate("2"); extracted.setInvoiceSeries(" c26taa ");
+        org.mockito.Mockito.doReturn(extracted).when(extraction).extractInvoice(org.mockito.ArgumentMatchers.any());
+        long id=upload(login,"first.pdf","%PDF-1.7 first".getBytes()).at("/items/0/id").asLong();
+        JsonNode confirmed=json.readTree(mvc.perform(post("/api/intake/items/"+id+"/confirm")
+            .session(login.session()).header("X-CSRF-Token",login.csrf()).contentType("application/json")
+            .content(draft(login,id).toString())).andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
+        long invoiceId=confirmed.path("invoiceId").asLong();
+        // Simulate a PDF imported before the new three-field key existed.
+        jdbc.update("update invoices set identity_key=? where id=?", "old-four-field-key", invoiceId);
+        JsonNode duplicate=upload(login,"same.xml",xml("00099","0300000001",a.getTaxCode()));
+        assertThat(duplicate.at("/items/0/state").asText()).isEqualTo("DUPLICATE_IDENTITY");
+        assertThat(duplicate.at("/items/0/invoiceId").asLong()).isEqualTo(invoiceId);
+        mvc.perform(put("/api/invoices/"+invoiceId+"/review").session(login.session()).header("X-CSRF-Token",login.csrf())
+            .contentType("application/json").content("{\"status\":\"APPROVED\"}")).andExpect(status().isOk());
+        assertThat(jdbc.queryForObject("select count(*) from invoices",Long.class)).isEqualTo(1);
+        mvc.perform(get("/api/analytics/summary").session(login.session())).andExpect(status().isOk())
+            .andExpect(jsonPath("$.totalApprovedSpend").value(110000));
+    }
+    @Test void differentSeriesIsNotDuplicateAndOtherTenantCanImportSameIdentity() throws Exception {
+        Login login=login();
+        upload(login,"first.xml",xml("00099","0300000001",a.getTaxCode()));
+        byte[] different=new String(xml("00099","0300000001",a.getTaxCode()),StandardCharsets.UTF_8)
+            .replace("C26TAA","C26TAB").getBytes(StandardCharsets.UTF_8);
+        assertThat(upload(login,"different.xml",different).at("/items/0/state").asText()).isEqualTo("INGESTED");
+        member(b,true); login.session().setAttribute("tenantId",b.getId());
+        assertThat(upload(login,"other-tenant.xml",xml("00099","0300000001",b.getTaxCode())).at("/items/0/state").asText()).isEqualTo("INGESTED");
+        assertThat(jdbc.queryForObject("select count(*) from invoices",Long.class)).isEqualTo(3);
+    }
+    @Test void duplicateAppearingAfterPdfOcrIsBlockedAtConfirmation() throws Exception {
+        Login login=login(); org.mockito.Mockito.doReturn(pdfData()).when(extraction).extractInvoice(org.mockito.ArgumentMatchers.any());
+        long id=upload(login,"pending.pdf","%PDF-1.7 pending".getBytes()).at("/items/0/id").asLong();
+        JsonNode data=draft(login,id);
+        upload(login,"arrived.xml",xml("00099","0300000001",a.getTaxCode()));
+        mvc.perform(post("/api/intake/items/"+id+"/confirm").session(login.session()).header("X-CSRF-Token",login.csrf())
+            .contentType("application/json").content(data.toString())).andExpect(status().isOk())
+            .andExpect(jsonPath("$.state").value("DUPLICATE_IDENTITY"));
+        assertThat(jdbc.queryForObject("select count(*) from invoices",Long.class)).isEqualTo(1);
+    }
+
+    @Test void excelExportsOnlyApprovedInvoicesForCurrentTenant() throws Exception {
+        Login login=login();
+        for (String number : java.util.List.of("approved-1","approved-2","pending","rejected","processing")) {
+            upload(login,number+".xml",xml(number,"0300000001",a.getTaxCode()));
+        }
+        jdbc.update("update invoices set status='APPROVED' where invoice_number like 'approved-%'");
+        jdbc.update("update invoices set status='REJECTED' where invoice_number='rejected'");
+        jdbc.update("update invoices set status='PROCESSING' where invoice_number='processing'");
+        member(b,true); login.session().setAttribute("tenantId",b.getId());
+        long other=upload(login,"other.xml",xml("other-approved","0300000001",b.getTaxCode())).at("/items/0/invoiceId").asLong();
+        jdbc.update("update invoices set status='APPROVED' where id=?",other);
+        login.session().setAttribute("tenantId",a.getId());
+        byte[] bytes=mvc.perform(get("/api/invoices/export").session(login.session())).andExpect(status().isOk())
+            .andExpect(header().string("Content-Type","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+            .andReturn().getResponse().getContentAsByteArray();
+        try(var book=new org.apache.poi.xssf.usermodel.XSSFWorkbook(new ByteArrayInputStream(bytes))) {
+            var sheet=book.getSheetAt(0);
+            assertThat(java.util.List.of(sheet.getRow(5).getCell(1).getStringCellValue(),sheet.getRow(6).getCell(1).getStringCellValue()))
+                .containsExactlyInAnyOrder("approved-1","approved-2");
+            assertThat(sheet.getLastRowNum()).isEqualTo(7);
+            assertThat(sheet.getRow(7).getCell(8).getCellFormula()).isEqualTo("SUM(I6:I7)");
+            assertThat(sheet.getRow(7).getCell(6).getNumericCellValue()).isEqualTo(200000);
+            assertThat(sheet.getRow(7).getCell(7).getNumericCellValue()).isEqualTo(20000);
+            assertThat(sheet.getRow(7).getCell(8).getNumericCellValue()).isEqualTo(220000);
+        }
+        mvc.perform(get("/api/analytics/summary").session(login.session())).andExpect(status().isOk())
+            .andExpect(jsonPath("$.totalApprovedSpend").value(220000));
+        mvc.perform(get("/api/invoices/export")).andExpect(status().isUnauthorized());
+    }
+    @Test void excelWithoutApprovedInvoicesHasNoInvoiceRowsAndZeroTotals() throws Exception {
+        Login login=login(); upload(login,"pending.xml",xml("pending","0300000001",a.getTaxCode()));
+        byte[] bytes=mvc.perform(get("/api/invoices/export").session(login.session())).andExpect(status().isOk())
+            .andReturn().getResponse().getContentAsByteArray();
+        try(var book=new org.apache.poi.xssf.usermodel.XSSFWorkbook(new ByteArrayInputStream(bytes))) {
+            var sheet=book.getSheetAt(0);
+            assertThat(sheet.getRow(5).getCell(1)).isNull();
+            assertThat(sheet.getRow(5).getCell(0).getStringCellValue()).contains("Chưa có hóa đơn đã duyệt");
+            for(int col=6;col<=8;col++) assertThat(sheet.getRow(6).getCell(col).getNumericCellValue()).isZero();
+            assertThat(sheet.getLastRowNum()).isEqualTo(6);
+        }
+    }
+    @Test void reviewCannotApproveLegacyDuplicateOrAnIdentityEditedIntoDuplicate() throws Exception {
+        Login login=login();
+        long first=upload(login,"first.xml",xml("00099","0300000001",a.getTaxCode())).at("/items/0/invoiceId").asLong();
+        long second=upload(login,"second.xml",xml("00100","0300000001",a.getTaxCode())).at("/items/0/invoiceId").asLong();
+        mvc.perform(put("/api/invoices/"+first+"/review").session(login.session()).header("X-CSRF-Token",login.csrf())
+            .contentType("application/json").content("{\"status\":\"APPROVED\"}")).andExpect(status().isOk());
+        mvc.perform(put("/api/invoices/"+second+"/review").session(login.session()).header("X-CSRF-Token",login.csrf())
+            .contentType("application/json").content("{\"status\":\"APPROVED\",\"invoiceNumber\":\"00099\"}"))
+            .andExpect(status().isConflict());
+        assertThat(jdbc.queryForObject("select invoice_number from invoices where id=?",String.class,second)).isEqualTo("00100");
+        // Legacy rows may have a different hash but the same business identity.
+        jdbc.update("update invoices set invoice_number='00099' where id=?",second);
+        mvc.perform(post("/api/invoices/"+second+"/recheck").session(login.session()).header("X-CSRF-Token",login.csrf()))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.duplicateSuspected").value(true));
+        mvc.perform(put("/api/invoices/"+second+"/review").session(login.session()).header("X-CSRF-Token",login.csrf())
+            .contentType("application/json").content("{\"status\":\"APPROVED\"}")).andExpect(status().isConflict());
+        mvc.perform(get("/api/analytics/summary").session(login.session())).andExpect(status().isOk())
+            .andExpect(jsonPath("$.totalApprovedSpend").value(110000));
+    }
+
 }

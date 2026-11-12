@@ -38,10 +38,11 @@ public interface InvoiceRepository extends JpaRepository<Invoice, Long> {
     @Query("select count(i) from Invoice i where i.tenantId = ?#{T(com.fsa.expense.auth.TenantContext).id()} and i.status = :status")
     long countByStatus(InvoiceStatus status);
 
-    @Query("SELECT i FROM Invoice i WHERE i.tenantId = ?#{T(com.fsa.expense.auth.TenantContext).id()} AND i.invoiceNumber = :invoiceNumber AND i.taxCode = :taxCode AND (:excludeId IS NULL OR i.id != :excludeId) AND i.status != 'REJECTED'")
+    @Query("SELECT i FROM Invoice i WHERE i.tenantId = ?#{T(com.fsa.expense.auth.TenantContext).id()} AND upper(trim(i.invoiceNumber)) = upper(trim(:invoiceNumber)) AND upper(trim(i.taxCode)) = upper(trim(:taxCode)) AND upper(trim(i.invoiceSeries)) = upper(trim(:series)) AND (:excludeId IS NULL OR i.id != :excludeId) ORDER BY i.id")
     List<Invoice> findPotentialDuplicates(
             @Param("invoiceNumber") String invoiceNumber,
             @Param("taxCode") String taxCode,
+            @Param("series") String series,
             @Param("excludeId") Long excludeId
     );
 

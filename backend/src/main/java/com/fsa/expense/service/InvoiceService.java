@@ -28,6 +28,7 @@ public class InvoiceService {
     private final FileStorageService fileStorageService;
     private final AiExtractionClient aiExtractionClient;
     private final AuditValidationService auditValidationService;
+    private final com.fsa.expense.auth.TenantRepository tenants;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public InvoiceService(InvoiceRepository invoiceRepository,
@@ -35,13 +36,15 @@ public class InvoiceService {
                           ErrorLogRepository errorLogRepository,
                           FileStorageService fileStorageService,
                           AiExtractionClient aiExtractionClient,
-                          AuditValidationService auditValidationService) {
+                          AuditValidationService auditValidationService,
+                          com.fsa.expense.auth.TenantRepository tenants) {
         this.invoiceRepository = invoiceRepository;
         this.lineItemRepository = lineItemRepository;
         this.errorLogRepository = errorLogRepository;
         this.fileStorageService = fileStorageService;
         this.aiExtractionClient = aiExtractionClient;
         this.auditValidationService = auditValidationService;
+        this.tenants = tenants;
     }
 
     @Transactional
@@ -163,6 +166,7 @@ public class InvoiceService {
 
     @Transactional
     public InvoiceResponseDto reviewInvoice(Long id, ReviewInvoiceRequest request) {
+        tenants.lockById(com.fsa.expense.auth.TenantContext.id()).orElseThrow();
         Invoice invoice = invoiceRepository.findById(id)
                 .orElseThrow(() -> com.fsa.expense.auth.AuthService.error(404, "Không tìm thấy hóa đơn"));
 
@@ -235,6 +239,13 @@ public class InvoiceService {
 
         // Update status and audit reviewer info
         InvoiceStatus targetStatus = request.getStatus() != null ? request.getStatus() : InvoiceStatus.APPROVED;
+        if (targetStatus == InvoiceStatus.APPROVED && Boolean.TRUE.equals(invoice.getDuplicateSuspected())) {
+            throw com.fsa.expense.auth.AuthService.error(409,
+                "Hóa đơn trùng MST người bán, ký hiệu và số hóa đơn; không thể duyệt để tính tiền lần hai");
+        }
+        if (!Boolean.TRUE.equals(invoice.getDuplicateSuspected())) {
+            invoice.setIdentityKey(InvoiceIdentity.key(invoice.getTaxCode(), invoice.getInvoiceSeries(), invoice.getInvoiceNumber()));
+        }
         invoice.setStatus(targetStatus);
         invoice.setReviewedBy(reviewer);
         invoice.setReviewedAt(LocalDateTime.now());
