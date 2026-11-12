@@ -1,5 +1,8 @@
 # Tiếp nhận email
 
+> **Tài liệu phiên bản đầu, giữ để tham khảo.** Hướng dẫn hiện tại và thay đổi
+> whitelist/retry/PDF nằm tại [email-intake-v2.md](email-intake-v2.md).
+
 Module backend bổ sung vào Spring Boot/PostgreSQL hiện có. Đây là luồng webhook
 JSON chuẩn hóa; nhà cung cấp cần adapter chuyển payload SendGrid/Postmark sang
 hợp đồng bên dưới. Chưa thay thế toàn bộ kiến trúc Inbot trong bản nghiệp vụ.

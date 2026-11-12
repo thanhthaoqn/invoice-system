@@ -66,7 +66,7 @@ const Workspace: React.FC<{ session: Session; collapsed: boolean }> = ({ session
 
       <main className="min-w-0 flex-1 px-3 sm:px-6 lg:px-8">
         {activeTab === 'invoices' && <InvoiceList session={session} invoices={invoices} isLoading={loading} onRefresh={fetchInvoices} onSelectInvoiceForReview={handleSelectInvoiceForReview} />}
-        {activeTab === 'emails' && <EmailInbox canCreate={session.invoiceCreate} onChanged={fetchInvoices} />}
+        {activeTab === 'emails' && <EmailInbox canCreate={session.invoiceCreate} onChanged={fetchInvoices} onOpenInvoice={handleSelectInvoiceForReview} />}
         {activeTab === 'upload' && (
           <UploadSection
             session={session}

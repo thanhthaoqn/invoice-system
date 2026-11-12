@@ -76,7 +76,7 @@ check('Wrong webhook secret', r.status_code == 401, r.status_code)
 untrusted = payload('untrusted')
 untrusted['sender'] = 'untrusted@example.test'
 r = send(untrusted)
-check('Sender whitelist', r.status_code == 403, r.status_code)
+check('Webhook does not apply OWN_IMAP sender whitelist', r.status_code == 200, r.status_code)
 r = send(first_body)
 r.raise_for_status()
 first = r.json()
@@ -113,7 +113,7 @@ check('Reprocess retained original without duplicating successful invoice', retr
       {'state': retried['state'], 'attempts': retried['attempts'], 'documents': [d['state'] for d in docs]})
 session.post(BASE + f'/api/emails/{partial["id"]}/reprocess', timeout=120).raise_for_status()
 r = session.post(BASE + f'/api/emails/{partial["id"]}/reprocess', timeout=30)
-check('Retry limit', r.status_code == 409, r.status_code)
+check('Manual reprocess remains available after automatic retry budget', r.status_code == 200, r.status_code)
 
 for name, zipped, expected in [
     ('zip-multiple', archive([('a.xml', xml('zip-a')), ('folder/b.xml', xml('zip-b'))]), 'ARCHIVE_PROCESSED'),
@@ -143,7 +143,7 @@ check('Retained attachment bytes are unchanged', r.status_code == 200 and r.cont
 r = send(payload('pdf-only', [('standalone.pdf', pdf_bytes)]))
 r.raise_for_status()
 pdf_only = r.json()
-check('PDF-only goes to review through real AI service', pdf_only['state'] == 'NO_XML'
+check('PDF-only goes to review through real AI service', pdf_only['state'] == 'NEEDS_REVIEW'
       and detail(pdf_only)[0]['state'] == 'OCR_REVIEW', [d['state'] for d in detail(pdf_only)])
 r = send(payload('portal-only', html='<a href="https://supplier.test/lookup/123">Lookup</a>'))
 r.raise_for_status()

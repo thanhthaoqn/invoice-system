@@ -1,6 +1,7 @@
 package com.fsa.expense.service;
 
 import com.fsa.expense.entity.Invoice;
+import com.fsa.expense.entity.InvoiceStatus;
 import com.fsa.expense.repository.InvoiceRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -26,7 +27,7 @@ public class ExcelExportService {
     }
 
     public byte[] generateExpenseReportExcel() throws IOException {
-        List<Invoice> invoices = invoiceRepository.findAllByOrderByCreatedAtDesc();
+        List<Invoice> invoices = invoiceRepository.findByStatusOrderByCreatedAtDesc(InvoiceStatus.APPROVED);
 
         try (Workbook workbook = new XSSFWorkbook(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
             Sheet sheet = workbook.createSheet("Bảng Kê Chi Phí");
@@ -96,6 +97,11 @@ public class ExcelExportService {
             subCell.setCellStyle(subTitleStyle);
             sheet.addMergedRegion(new CellRangeAddress(2, 2, 0, 11));
 
+            Cell scopeCell = sheet.createRow(3).createCell(0);
+            scopeCell.setCellValue("Chỉ bao gồm hóa đơn đã duyệt | Số hóa đơn: " + invoices.size());
+            scopeCell.setCellStyle(subTitleStyle);
+            sheet.addMergedRegion(new CellRangeAddress(3, 3, 0, 11));
+
             // Row 4: Table Headers
             String[] headers = {
                     "STT", "Số Hóa Đơn", "Ngày Lập", "Đơn Vị Bán Hàng / Đối Tác",
@@ -154,7 +160,7 @@ public class ExcelExportService {
                 c8.setCellStyle(currencyStyle);
 
                 Cell c9 = row.createCell(9);
-                c9.setCellValue(inv.getStatus() != null ? inv.getStatus().name() : "");
+                c9.setCellValue("Đã duyệt");
                 c9.setCellStyle(defaultStyle);
 
                 Cell c10 = row.createCell(10);
@@ -166,7 +172,14 @@ public class ExcelExportService {
                 c11.setCellStyle(defaultStyle);
             }
 
-            // Summary row
+            if (invoices.isEmpty()) {
+                Cell emptyCell = sheet.createRow(rowIdx++).createCell(0);
+                emptyCell.setCellValue("Chưa có hóa đơn đã duyệt để xuất bảng kê chi phí.");
+                emptyCell.setCellStyle(subTitleStyle);
+                sheet.addMergedRegion(new CellRangeAddress(5, 5, 0, 11));
+            }
+
+            // Totals cover approved data rows only; an empty report has zero totals.
             if (rowIdx > 5) {
                 Row summaryRow = sheet.createRow(rowIdx);
                 Cell sumLabel = summaryRow.createCell(0);
@@ -179,15 +192,18 @@ public class ExcelExportService {
                 }
 
                 Cell sumSubtotal = summaryRow.createCell(6);
-                sumSubtotal.setCellFormula("SUM(G6:G" + rowIdx + ")");
+                if (invoices.isEmpty()) sumSubtotal.setCellValue(0);
+                else sumSubtotal.setCellFormula("SUM(G6:G" + rowIdx + ")");
                 sumSubtotal.setCellStyle(totalStyle);
 
                 Cell sumVat = summaryRow.createCell(7);
-                sumVat.setCellFormula("SUM(H6:H" + rowIdx + ")");
+                if (invoices.isEmpty()) sumVat.setCellValue(0);
+                else sumVat.setCellFormula("SUM(H6:H" + rowIdx + ")");
                 sumVat.setCellStyle(totalStyle);
 
                 Cell sumTotal = summaryRow.createCell(8);
-                sumTotal.setCellFormula("SUM(I6:I" + rowIdx + ")");
+                if (invoices.isEmpty()) sumTotal.setCellValue(0);
+                else sumTotal.setCellFormula("SUM(I6:I" + rowIdx + ")");
                 sumTotal.setCellStyle(totalStyle);
 
                 for (int col = 9; col <= 11; col++) {
@@ -201,6 +217,7 @@ public class ExcelExportService {
                 sheet.setColumnWidth(i, Math.max(sheet.getColumnWidth(i) + 1200, 3500));
             }
 
+            workbook.getCreationHelper().createFormulaEvaluator().evaluateAll();
             workbook.write(out);
             log.info("Generated Expense Report Excel with {} invoices", invoices.size());
             return out.toByteArray();

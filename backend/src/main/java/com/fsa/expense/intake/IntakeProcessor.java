@@ -8,7 +8,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.*;
 import java.nio.file.Files;
 import java.time.Instant;
-import java.util.Optional;
 
 @Service
 public class IntakeProcessor {
@@ -25,23 +24,34 @@ public class IntakeProcessor {
     private final com.fasterxml.jackson.databind.ObjectMapper json;
     private final com.fsa.expense.email.TenantAliasRepository aliases;
     private final com.fsa.expense.email.EmailMessageRepository emails;
+    private final com.fsa.expense.email.RiskEnterpriseRepository risks;
+    private final com.fsa.expense.email.OcrJobRepository ocrJobs;
+    private final boolean asyncOcr;
+    private final com.fsa.expense.email.EmailQuotaService quota;
     public IntakeProcessor(IntakeItemRepository items, IntakeAttemptRepository attempts, TenantRepository tenants,
             InvoiceRepository invoices, InvoiceXmlParser parser, FileStorageService storage, AuditValidationService audit, IntakeLimits limits,
             AiExtractionClient extraction, PdfInvoiceMapper pdfMapper, com.fasterxml.jackson.databind.ObjectMapper json,
-            com.fsa.expense.email.TenantAliasRepository aliases,com.fsa.expense.email.EmailMessageRepository emails) {
+            com.fsa.expense.email.TenantAliasRepository aliases,com.fsa.expense.email.EmailMessageRepository emails,
+            com.fsa.expense.email.RiskEnterpriseRepository risks,com.fsa.expense.email.OcrJobRepository ocrJobs,
+            @org.springframework.beans.factory.annotation.Value("${app.email.ocr-async-enabled:false}") boolean asyncOcr,
+            com.fsa.expense.email.EmailQuotaService quota) {
         this.items=items; this.attempts=attempts; this.tenants=tenants; this.invoices=invoices;
         this.parser=parser; this.storage=storage; this.audit=audit; this.limits=limits;
         this.extraction=extraction; this.pdfMapper=pdfMapper; this.json=json;
         this.aliases=aliases;
         this.emails=emails;
+        this.risks=risks;
+        this.ocrJobs=ocrJobs;this.asyncOcr=asyncOcr;
+        this.quota=quota;
     }
     @Transactional(propagation=Propagation.REQUIRES_NEW)
     public IntakeItem process(Long id, boolean retry) {
         // Serialize canonical creation and retry per tenant across application instances.
         Tenant tenant = tenants.lockById(TenantContext.id()).orElseThrow();
         IntakeItem item = items.findByIdAndTenantId(id, tenant.getId()).orElseThrow(() -> AuthService.error(404, "Không tìm thấy tài liệu"));
+        if(retry && "OCR_REVIEW".equals(item.getState()))return item;
         boolean stale = "RECEIVED".equals(item.getState()) && item.getUpdatedAt().isBefore(Instant.now().minusSeconds(300));
-        if (retry && !("PARSE_FAILED".equals(item.getState()) || "PROCESSING_FAILED".equals(item.getState()) || "OCR_FAILED".equals(item.getState()) || stale)) throw AuthService.error(409, "Tài liệu không thuộc trạng thái được xử lý lại hoặc vẫn đang xử lý");
+        if (retry && !("PARSE_FAILED".equals(item.getState()) || "PROCESSING_FAILED".equals(item.getState()) || "OCR_FAILED".equals(item.getState()) || "OCR_PENDING".equals(item.getState()) || stale)) throw AuthService.error(409, "Tài liệu không thuộc trạng thái được xử lý lại hoặc vẫn đang xử lý");
         if (!retry && !"RECEIVED".equals(item.getState())) return item;
         if (item.getAttempts() >= limits.getMaxAttempts()) throw AuthService.error(409, "Đã đạt giới hạn xử lý lại");
         item.setAttempts(item.getAttempts()+1);
@@ -54,6 +64,11 @@ public class IntakeProcessor {
             return finish(item, "ALREADY_RECEIVED", "Đã tiếp nhận nội dung này trước đó");
         }
         if ("PDF".equals(item.getDocumentType())) {
+            if(asyncOcr && TenantContext.emailIntake()){
+                var job=ocrJobs.findByItemId(item.getId()).orElseGet(com.fsa.expense.email.OcrJob::new);
+                job.setTenantId(tenant.getId());job.setItemId(item.getId());job.setState("PENDING");ocrJobs.save(job);
+                return finish(item,"OCR_PENDING","Đã xếp hàng trích xuất PDF; chờ đối soát");
+            }
             var existing=items.findFirstByTenantIdAndContentHashAndStateOrderById(tenant.getId(), item.getContentHash(), "OCR_REVIEW");
             if (existing.isPresent() && !existing.get().getId().equals(item.getId())) {
                 item.setOriginalItemId(existing.get().getId());
@@ -66,10 +81,8 @@ public class IntakeProcessor {
                 item.setRawExtraction(json.writeValueAsString(data)); item.setDraftJson(item.getRawExtraction());
 
                 // Chặn trùng danh tính ngay tại bước trích xuất nếu hóa đơn đã được tiếp nhận (từ XML hoặc PDF trước)
-                if (data.getTaxCode() != null && data.getInvoiceNumber() != null && data.getInvoiceSeries() != null) {
-                    String template = data.getInvoiceTemplate() != null ? data.getInvoiceTemplate() : (data.getInvoiceSeries().length() > 0 ? data.getInvoiceSeries().substring(0, 1) : "1");
-                    var duplicate = findDuplicate(tenant.getId(), data.getTaxCode(), template,
-                        data.getInvoiceSeries(), data.getInvoiceNumber());
+                if (com.fsa.expense.service.InvoiceIdentity.key(data.getTaxCode(), data.getInvoiceTemplate(), data.getInvoiceSeries(), data.getInvoiceNumber()) != null) {
+                    var duplicate = findDuplicate(data.getTaxCode(), data.getInvoiceTemplate(), data.getInvoiceSeries(), data.getInvoiceNumber());
                     if (duplicate.isPresent()) {
                         item.setInvoiceId(duplicate.get().getId());
                         return finish(item, "DUPLICATE_IDENTITY", "Hóa đơn này đã được tiếp nhận trong hệ thống (" + duplicate.get().getFileType() + " #" + duplicate.get().getId() + "); không tạo bản trùng.");
@@ -90,17 +103,19 @@ public class IntakeProcessor {
     }
     private IntakeItem persist(IntakeItem item,Tenant tenant,Invoice invoice) {
         if (tenant.getTaxCode().equals(invoice.getTaxCode())) return finish(item, "REJECTED_OUTBOUND", "Đây là hóa đơn đầu ra của doanh nghiệp");
-        var request=((org.springframework.web.context.request.ServletRequestAttributes)org.springframework.web.context.request.RequestContextHolder.currentRequestAttributes()).getRequest();
-        if((Boolean.TRUE.equals(request.getAttribute("emailIntake")) || emails.existsByTenantIdAndSessionId(tenant.getId(),item.getSessionId())) && !tenant.getTaxCode().equals(invoice.getBuyerTaxCode())
+        boolean emailSource=TenantContext.emailIntake() || emails.existsByTenantIdAndSessionId(tenant.getId(),item.getSessionId());
+        if(emailSource && !tenant.getTaxCode().equals(invoice.getBuyerTaxCode())
                 && !aliases.existsByTenantIdAndTaxCode(tenant.getId(),invoice.getBuyerTaxCode()))
             return finish(item,"REJECTED_ROUTING","MST người mua không thuộc doanh nghiệp hoặc chi nhánh phụ thuộc");
-        var duplicate = findDuplicate(tenant.getId(), invoice.getTaxCode(), invoice.getInvoiceTemplate(),
-            invoice.getInvoiceSeries(), invoice.getInvoiceNumber());
+        var duplicate = findDuplicate(invoice.getTaxCode(), invoice.getInvoiceTemplate(), invoice.getInvoiceSeries(), invoice.getInvoiceNumber());
         if (duplicate.isPresent()) {
             item.setInvoiceId(duplicate.get().getId());
-            return finish(item, "DUPLICATE_IDENTITY", "Khác nội dung nhưng trùng MST bán, mẫu số, ký hiệu và số hóa đơn");
+            return finish(item, "DUPLICATE_IDENTITY", "Trùng lặp: MST người bán, ký hiệu và số hóa đơn đã tồn tại; không tạo mới, không tính tiền lần hai");
         }
+        if(emailSource && !quota.consume(tenant.getId()))return finish(item,"QUOTA_EXCEEDED","Vượt hạn mức hóa đơn email trong tháng; bản gốc được giữ để xử lý lại");
         invoice.setTenantId(tenant.getId()); invoice.setContentHash(item.getContentHash());
+        if(emailSource)invoice.setSource("EMAIL_POLLER");
+        invoice.setTaxRiskState(risks.existsByTaxCodeAndActiveTrue(invoice.getTaxCode())?"HIGH_TAX_RISK":"NOT_LISTED");
         invoice.setFilePath(item.getStoragePath()); invoice.setFileName(baseName(item.getFileName()));
         invoice.setFileSize(item.getFileSize()); invoice.setSubmittedBy(TenantContext.username());
         String message = "Đã tạo hóa đơn; chờ đối soát, chưa phê duyệt. Chưa xác minh chữ ký điện tử.";
@@ -150,10 +165,8 @@ public class IntakeProcessor {
             item.setDraftJson(item.getRawExtraction());
 
             // Chặn trùng danh tính nếu hóa đơn đã được nạp
-            if (data.getTaxCode() != null && data.getInvoiceNumber() != null && data.getInvoiceSeries() != null) {
-                String template = data.getInvoiceTemplate() != null ? data.getInvoiceTemplate() : (data.getInvoiceSeries().length() > 0 ? data.getInvoiceSeries().substring(0, 1) : "1");
-                var duplicate = findDuplicate(tenant.getId(), data.getTaxCode(), template,
-                    data.getInvoiceSeries(), data.getInvoiceNumber());
+            if (com.fsa.expense.service.InvoiceIdentity.key(data.getTaxCode(), data.getInvoiceTemplate(), data.getInvoiceSeries(), data.getInvoiceNumber()) != null) {
+                var duplicate = findDuplicate(data.getTaxCode(), data.getInvoiceTemplate(), data.getInvoiceSeries(), data.getInvoiceNumber());
                 if (duplicate.isPresent()) {
                     item.setInvoiceId(duplicate.get().getId());
                     return finish(item, "DUPLICATE_IDENTITY", "Hóa đơn này đã được tiếp nhận trong hệ thống (" + duplicate.get().getFileType() + " #" + duplicate.get().getId() + "); không tạo bản trùng.");
@@ -164,6 +177,10 @@ public class IntakeProcessor {
         } catch (Exception e) {
             throw AuthService.error(500, "Lỗi khi trích xuất lại: " + e.getMessage());
         }
+    }
+    private java.util.Optional<Invoice> findDuplicate(String tax, String template, String series, String number) {
+        // Compare fields too: older invoices still carry the previous four-field hash.
+        return invoices.findPotentialDuplicates(number, tax, template, series, null).stream().findFirst();
     }
     private record StoredPdf(byte[] bytes,String filename) implements org.springframework.web.multipart.MultipartFile {
         public String getName(){return "file";} public String getOriginalFilename(){return filename;}
@@ -188,14 +205,4 @@ public class IntakeProcessor {
         finish(item,"PROCESSING_FAILED","Xử lý chưa hoàn tất; có thể xử lý lại từ bản gốc");
     }
     private String baseName(String name) { String[] parts=name.replace('\\','/').split("/"); return parts[parts.length-1]; }
-    private Optional<Invoice> findDuplicate(Long tenantId, String taxCode, String template, String series, String number) {
-        String identityKey = InvoiceIdentity.hash(taxCode, template, series, number);
-        Optional<Invoice> keyed = invoices.findByTenantIdAndIdentityKey(tenantId, identityKey);
-        if (keyed.isPresent()) return keyed;
-        // Compatibility for rows created before canonical identity keys were introduced.
-        String cleanTaxCode = taxCode == null ? "" : taxCode.trim();
-        return invoices.findByTenantIdAndTaxCode(tenantId, cleanTaxCode).stream()
-            .filter(existing -> InvoiceIdentity.matches(existing, taxCode, template, series, number))
-            .findFirst();
-    }
 }

@@ -118,7 +118,8 @@ public class AuditValidationService {
 
     public void auditDuplicate(Invoice invoice) {
         if (invoice.getInvoiceNumber() == null || invoice.getInvoiceNumber().isBlank()
-                || invoice.getTaxCode() == null || invoice.getTaxCode().isBlank()) {
+                || invoice.getTaxCode() == null || invoice.getTaxCode().isBlank()
+                || invoice.getInvoiceSeries() == null || invoice.getInvoiceSeries().isBlank()) {
             invoice.setDuplicateSuspected(false);
             invoice.setDuplicateWarningMessage(null);
             return;
@@ -127,6 +128,8 @@ public class AuditValidationService {
         List<Invoice> existingDuplicates = invoiceRepository.findPotentialDuplicates(
                 invoice.getInvoiceNumber().trim(),
                 invoice.getTaxCode().trim(),
+                invoice.getInvoiceTemplate(),
+                invoice.getInvoiceSeries().trim(),
                 invoice.getId()
         );
 
@@ -134,9 +137,10 @@ public class AuditValidationService {
             Invoice duplicate = existingDuplicates.get(0);
             invoice.setDuplicateSuspected(true);
             String warningMsg = String.format(
-                    "Cảnh báo trùng lặp chứng từ: Hóa đơn số '%s' với Mã số thuế '%s' đã từng được nộp vào hệ thống trước đó (Hóa đơn ID #%d, nộp bởi '%s' ngày %s)",
+                    "Cảnh báo trùng lặp chứng từ: Hóa đơn số '%s', MST người bán '%s', ký hiệu '%s' đã có trong hệ thống (Hóa đơn ID #%d, nộp bởi '%s' ngày %s); không tính tiền lần hai",
                     invoice.getInvoiceNumber(),
                     invoice.getTaxCode(),
+                    invoice.getInvoiceSeries(),
                     duplicate.getId(),
                     duplicate.getSubmittedBy() != null ? duplicate.getSubmittedBy() : "Nhân viên khác",
                     duplicate.getCreatedAt() != null ? duplicate.getCreatedAt().toLocalDate() : "trước đây"

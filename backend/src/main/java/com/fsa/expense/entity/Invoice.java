@@ -33,6 +33,8 @@ public class Invoice {
     private String currency;
     private String source;
     private String validationState;
+    private String signatureState;
+    private String taxRiskState;
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
