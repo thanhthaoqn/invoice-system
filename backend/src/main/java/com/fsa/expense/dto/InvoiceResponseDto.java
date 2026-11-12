@@ -17,6 +17,8 @@ import java.util.List;
 public class InvoiceResponseDto {
     private Long id;
     private String validationState;
+    private String signatureState;
+    private String taxRiskState;
     private String buyerTaxCode;
     private String buyerName;
     private String sellerAddress;

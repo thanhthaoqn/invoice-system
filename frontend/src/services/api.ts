@@ -2,10 +2,18 @@ import axios from 'axios';
 
 const API_BASE = '/api';
 
-export interface EmailMessage { id: number; sender: string; subject: string; state: string; sessionId: number | null; attempts: number; note: string; createdAt: string; updatedAt: string }
+export interface EmailMessage { id: number; sender: string; subject: string; state: string; channel: string | null; sessionId: number | null; attempts: number; retryCount: number; reprocessCount: number; deadLetter: boolean; nextRetryAt: string | null; note: string; createdAt: string; updatedAt: string }
+export interface MailboxAccount { email: string; host: string; port: number; active: boolean; allowedSenders: string; lastPolledAt: string | null; lastError: string | null }
+export interface MailboxSettings { account: MailboxAccount | null; encryptionConfigured: boolean; allowedHosts: string[] }
+export interface SystemMailbox { configured: boolean; mailbox: { address: string } | null }
 export const emailApi = {
   history: async () => (await axios.get<EmailMessage[]>('/api/emails')).data,
   reprocess: async (id: number) => (await axios.post<EmailMessage>(`/api/emails/${id}/reprocess`)).data,
+  mailbox: async () => (await axios.get<MailboxSettings>('/api/emails/mailbox')).data,
+  saveMailbox: async (settings: Omit<MailboxAccount, 'lastPolledAt' | 'lastError'> & { password: string }) => (await axios.put<MailboxAccount>('/api/emails/mailbox', settings)).data,
+  sync: async () => (await axios.post<{ received: number; rejected: number }>('/api/emails/sync')).data,
+  systemMailbox: async () => (await axios.get<SystemMailbox>('/api/emails/system-mailbox')).data,
+  provision: async () => (await axios.post<{ address: string }>('/api/emails/system-mailbox')).data,
 };
 
 let csrfToken = '';
@@ -48,6 +56,7 @@ export const authApi = {
   logout: async () => { await axios.post('/api/auth/logout'); csrfToken = ''; },
 };
 export const intakeApi = {
+  session: async (id: number) => (await axios.get<UploadResult>(`/api/intake/sessions/${id}`)).data,
   pdfDraft: async (id: number) => (await axios.get<PdfDraft>(`/api/intake/items/${id}/draft`)).data,
   reExtractPdf: async (id: number) => (await axios.post<PdfDraft>(`/api/intake/items/${id}/re-extract`)).data,
   savePdfDraft: async (id: number, draft: PdfDraft) => (await axios.put<PdfDraft>(`/api/intake/items/${id}/draft`, draft)).data,
@@ -74,6 +83,8 @@ export interface InvoiceLineItem {
 }
 
 export interface Invoice {
+  signatureState?: string | null;
+  taxRiskState?: string | null;
   id: number;
   validationState?: string | null;
   buyerTaxCode?: string | null;

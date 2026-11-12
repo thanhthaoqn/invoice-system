@@ -94,7 +94,7 @@ class IntakeIntegrationTest {
         org.mockito.Mockito.doThrow(new IllegalStateException("disk unavailable")).when(storage).storeBytes(org.mockito.ArgumentMatchers.any());
         try {
             var payload=new com.fsa.expense.email.EmailPayload("<message-2>","vendor@example.com","Invoice",null,java.util.List.of());
-            assertThatThrownBy(() -> emailIntake.receive(payload)).isInstanceOf(IllegalStateException.class);
+            assertThatThrownBy(() -> emailIntake.receive(payload)).isInstanceOf(com.fsa.expense.email.IntakePersistException.class);
             assertThat(emailMessages.count()).isZero();
         } finally {org.mockito.Mockito.reset(storage);org.springframework.web.context.request.RequestContextHolder.resetRequestAttributes();}
     }

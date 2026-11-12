@@ -15,8 +15,14 @@ public class EmailMessage {
     @Column(length=1000) private String subject;
     private String state="RECEIVED";
     @JsonIgnore private String rawPath;
+    @JsonIgnore private String originalMimePath;
     private Long sessionId;
     private int attempts;
+    private String channel;
+    private Instant nextRetryAt;
+    @Column(nullable=false,columnDefinition="integer default 0") private int retryCount;
+    @Column(nullable=false,columnDefinition="integer default 0") private int reprocessCount;
+    @Column(nullable=false,columnDefinition="boolean default false") private boolean deadLetter;
     @Column(length=1000) private String note;
     private Instant createdAt=Instant.now();
     private Instant updatedAt=Instant.now();

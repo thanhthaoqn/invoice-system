@@ -1,6 +1,7 @@
 # Sprint 1: login và tiếp nhận XML/ZIP
 
 Đã bổ sung [API tiếp nhận email và xử lý lại từ bản gốc](docs/email-intake.md).
+Phiên bản mới có [kết nối IMAP, hộp thư hệ thống, retry và OCR queue](docs/email-intake-v2.md).
 
 Đã bổ sung [scan PDF, kiểm tra dữ liệu và xác nhận hóa đơn](docs/pdf-intake.md),
 cùng bộ trường với XML; hỗ trợ PDF có chữ và PDF scan qua dịch vụ OCR.

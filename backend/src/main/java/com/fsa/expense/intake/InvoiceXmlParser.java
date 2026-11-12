@@ -32,11 +32,12 @@ public class InvoiceXmlParser {
                 @Override public void fatalError(SAXParseException e) throws SAXException { throw e; }
             });
             Element root = builder.parse(new ByteArrayInputStream(bytes)).getDocumentElement();
-            Element data = "DLHDon".equals(root.getLocalName()) ? root : descendant(root, "DLHDon");
+            Element data = "DLHDon".equalsIgnoreCase(root.getLocalName()) ? root : descendant(root, "DLHDon");
             if (data == null) throw new IllegalArgumentException("Không tìm thấy DLHDon trong XML hóa đơn");
             Element header = child(data, "TTChung");
             Element body = child(data, "NDHDon");
             Element seller = child(body, "NBan");
+            if(seller==null)seller=child(body,"nbanccthue");
             Element buyer = child(body, "NMua");
             Element payment = child(body, "TToan");
             String bName = text(buyer, "Ten", 255);
@@ -65,7 +66,7 @@ public class InvoiceXmlParser {
             Element goods = child(body, "DSHHDVu");
             if (goods != null) {
                 for (Node n = goods.getFirstChild(); n != null; n = n.getNextSibling()) {
-                    if (n instanceof Element item && "HHDVu".equals(item.getLocalName())) {
+                    if (n instanceof Element item && "HHDVu".equalsIgnoreCase(item.getLocalName())) {
                         // Notes, discounts and commercial descriptions are not ordinary goods lines.
                         String nature = text(item, "TChat", 10);
                         if (!nature.isEmpty() && !"1".equals(nature)) continue;
@@ -81,6 +82,7 @@ public class InvoiceXmlParser {
             }
             String identity = invoice.getTaxCode() + "|" + invoice.getInvoiceTemplate() + "|" + invoice.getInvoiceSeries() + "|" + invoice.getInvoiceNumber();
             invoice.setIdentityKey(com.fsa.expense.service.AuditValidationService.computeSha256(identity.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+            invoice.setSignatureState(signatureState(root));
             return invoice;
         } catch (Exception e) {
             if (e instanceof IllegalArgumentException) throw (IllegalArgumentException) e;
@@ -88,14 +90,16 @@ public class InvoiceXmlParser {
         }
     }
     private Element descendant(Element root, String name) {
-        NodeList list = root.getElementsByTagNameNS("*", name);
-        if (list.getLength() != 1) return null;
-        return (Element) list.item(0);
+        NodeList list = root.getElementsByTagName("*");Element found=null;
+        for(int i=0;i<list.getLength();i++)if(list.item(i) instanceof Element e && name.equalsIgnoreCase(e.getLocalName())){
+            if(found!=null)return null;found=e;
+        }
+        return found;
     }
     private Element child(Element parent, String name) {
         if (parent == null) return null;
         for (Node n = parent.getFirstChild(); n != null; n = n.getNextSibling())
-            if (n instanceof Element e && name.equals(e.getLocalName())) return e;
+            if (n instanceof Element e && name.equalsIgnoreCase(e.getLocalName())) return e;
         return null;
     }
     private String text(Element parent, String name, int limit) {
@@ -117,5 +121,19 @@ public class InvoiceXmlParser {
             if (result.precision() - result.scale() > 13 || result.scale() > 2) throw new NumberFormatException();
             return result;
         } catch (NumberFormatException e) { throw new IllegalArgumentException("Số tiền/số lượng " + name + " không hợp lệ"); }
+    }
+    private String signatureState(Element root){
+        NodeList signatures=root.getElementsByTagNameNS(javax.xml.crypto.dsig.XMLSignature.XMLNS,"Signature");
+        if(signatures.getLength()==0)return "MISSING";
+        try {
+            var factory=javax.xml.crypto.dsig.XMLSignatureFactory.getInstance("DOM");
+            for(int i=0;i<signatures.getLength();i++){
+                var context=new javax.xml.crypto.dsig.dom.DOMValidateContext(new javax.xml.crypto.KeySelector(){
+                    public javax.xml.crypto.KeySelectorResult select(javax.xml.crypto.dsig.keyinfo.KeyInfo keyInfo,Purpose purpose,javax.xml.crypto.AlgorithmMethod method,javax.xml.crypto.XMLCryptoContext context){return () -> null;}
+                },signatures.item(i));
+                factory.unmarshalXMLSignature(context); // Structure only; deliberately no validate() or trust claim.
+            }
+            return "PRESENT_UNVERIFIED";
+        }catch(Exception e){return "INVALID_STRUCTURE";}
     }
 }

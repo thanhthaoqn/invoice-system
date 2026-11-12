@@ -24,23 +24,34 @@ public class IntakeProcessor {
     private final com.fasterxml.jackson.databind.ObjectMapper json;
     private final com.fsa.expense.email.TenantAliasRepository aliases;
     private final com.fsa.expense.email.EmailMessageRepository emails;
+    private final com.fsa.expense.email.RiskEnterpriseRepository risks;
+    private final com.fsa.expense.email.OcrJobRepository ocrJobs;
+    private final boolean asyncOcr;
+    private final com.fsa.expense.email.EmailQuotaService quota;
     public IntakeProcessor(IntakeItemRepository items, IntakeAttemptRepository attempts, TenantRepository tenants,
             InvoiceRepository invoices, InvoiceXmlParser parser, FileStorageService storage, AuditValidationService audit, IntakeLimits limits,
             AiExtractionClient extraction, PdfInvoiceMapper pdfMapper, com.fasterxml.jackson.databind.ObjectMapper json,
-            com.fsa.expense.email.TenantAliasRepository aliases,com.fsa.expense.email.EmailMessageRepository emails) {
+            com.fsa.expense.email.TenantAliasRepository aliases,com.fsa.expense.email.EmailMessageRepository emails,
+            com.fsa.expense.email.RiskEnterpriseRepository risks,com.fsa.expense.email.OcrJobRepository ocrJobs,
+            @org.springframework.beans.factory.annotation.Value("${app.email.ocr-async-enabled:false}") boolean asyncOcr,
+            com.fsa.expense.email.EmailQuotaService quota) {
         this.items=items; this.attempts=attempts; this.tenants=tenants; this.invoices=invoices;
         this.parser=parser; this.storage=storage; this.audit=audit; this.limits=limits;
         this.extraction=extraction; this.pdfMapper=pdfMapper; this.json=json;
         this.aliases=aliases;
         this.emails=emails;
+        this.risks=risks;
+        this.ocrJobs=ocrJobs;this.asyncOcr=asyncOcr;
+        this.quota=quota;
     }
     @Transactional(propagation=Propagation.REQUIRES_NEW)
     public IntakeItem process(Long id, boolean retry) {
         // Serialize canonical creation and retry per tenant across application instances.
         Tenant tenant = tenants.lockById(TenantContext.id()).orElseThrow();
         IntakeItem item = items.findByIdAndTenantId(id, tenant.getId()).orElseThrow(() -> AuthService.error(404, "Không tìm thấy tài liệu"));
+        if(retry && "OCR_REVIEW".equals(item.getState()))return item;
         boolean stale = "RECEIVED".equals(item.getState()) && item.getUpdatedAt().isBefore(Instant.now().minusSeconds(300));
-        if (retry && !("PARSE_FAILED".equals(item.getState()) || "PROCESSING_FAILED".equals(item.getState()) || "OCR_FAILED".equals(item.getState()) || stale)) throw AuthService.error(409, "Tài liệu không thuộc trạng thái được xử lý lại hoặc vẫn đang xử lý");
+        if (retry && !("PARSE_FAILED".equals(item.getState()) || "PROCESSING_FAILED".equals(item.getState()) || "OCR_FAILED".equals(item.getState()) || "OCR_PENDING".equals(item.getState()) || stale)) throw AuthService.error(409, "Tài liệu không thuộc trạng thái được xử lý lại hoặc vẫn đang xử lý");
         if (!retry && !"RECEIVED".equals(item.getState())) return item;
         if (item.getAttempts() >= limits.getMaxAttempts()) throw AuthService.error(409, "Đã đạt giới hạn xử lý lại");
         item.setAttempts(item.getAttempts()+1);
@@ -53,6 +64,11 @@ public class IntakeProcessor {
             return finish(item, "ALREADY_RECEIVED", "Đã tiếp nhận nội dung này trước đó");
         }
         if ("PDF".equals(item.getDocumentType())) {
+            if(asyncOcr && TenantContext.emailIntake()){
+                var job=ocrJobs.findByItemId(item.getId()).orElseGet(com.fsa.expense.email.OcrJob::new);
+                job.setTenantId(tenant.getId());job.setItemId(item.getId());job.setState("PENDING");ocrJobs.save(job);
+                return finish(item,"OCR_PENDING","Đã xếp hàng trích xuất PDF; chờ đối soát");
+            }
             var existing=items.findFirstByTenantIdAndContentHashAndStateOrderById(tenant.getId(), item.getContentHash(), "OCR_REVIEW");
             if (existing.isPresent() && !existing.get().getId().equals(item.getId())) {
                 item.setOriginalItemId(existing.get().getId());
@@ -92,8 +108,8 @@ public class IntakeProcessor {
     }
     private IntakeItem persist(IntakeItem item,Tenant tenant,Invoice invoice) {
         if (tenant.getTaxCode().equals(invoice.getTaxCode())) return finish(item, "REJECTED_OUTBOUND", "Đây là hóa đơn đầu ra của doanh nghiệp");
-        var request=((org.springframework.web.context.request.ServletRequestAttributes)org.springframework.web.context.request.RequestContextHolder.currentRequestAttributes()).getRequest();
-        if((Boolean.TRUE.equals(request.getAttribute("emailIntake")) || emails.existsByTenantIdAndSessionId(tenant.getId(),item.getSessionId())) && !tenant.getTaxCode().equals(invoice.getBuyerTaxCode())
+        boolean emailSource=TenantContext.emailIntake() || emails.existsByTenantIdAndSessionId(tenant.getId(),item.getSessionId());
+        if(emailSource && !tenant.getTaxCode().equals(invoice.getBuyerTaxCode())
                 && !aliases.existsByTenantIdAndTaxCode(tenant.getId(),invoice.getBuyerTaxCode()))
             return finish(item,"REJECTED_ROUTING","MST người mua không thuộc doanh nghiệp hoặc chi nhánh phụ thuộc");
         var duplicate = invoices.findByTenantIdAndIdentityKey(tenant.getId(), invoice.getIdentityKey());
@@ -101,7 +117,10 @@ public class IntakeProcessor {
             item.setInvoiceId(duplicate.get().getId());
             return finish(item, "DUPLICATE_IDENTITY", "Khác nội dung nhưng trùng MST bán, mẫu số, ký hiệu và số hóa đơn");
         }
+        if(emailSource && !quota.consume(tenant.getId()))return finish(item,"QUOTA_EXCEEDED","Vượt hạn mức hóa đơn email trong tháng; bản gốc được giữ để xử lý lại");
         invoice.setTenantId(tenant.getId()); invoice.setContentHash(item.getContentHash());
+        if(emailSource)invoice.setSource("EMAIL_POLLER");
+        invoice.setTaxRiskState(risks.existsByTaxCodeAndActiveTrue(invoice.getTaxCode())?"HIGH_TAX_RISK":"NOT_LISTED");
         invoice.setFilePath(item.getStoragePath()); invoice.setFileName(baseName(item.getFileName()));
         invoice.setFileSize(item.getFileSize()); invoice.setSubmittedBy(TenantContext.username());
         String message = "Đã tạo hóa đơn; chờ đối soát, chưa phê duyệt. Chưa xác minh chữ ký điện tử.";

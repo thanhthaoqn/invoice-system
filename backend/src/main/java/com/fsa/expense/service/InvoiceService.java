@@ -299,6 +299,8 @@ public class InvoiceService {
         return InvoiceResponseDto.builder()
                 .id(invoice.getId())
                 .validationState(invoice.getValidationState())
+                .signatureState(invoice.getSignatureState())
+                .taxRiskState(invoice.getTaxRiskState())
                 .buyerTaxCode(invoice.getBuyerTaxCode())
                 .buyerName(invoice.getBuyerName()).sellerAddress(invoice.getSellerAddress()).buyerAddress(invoice.getBuyerAddress())
                 .currency(invoice.getCurrency()).source(invoice.getSource())
