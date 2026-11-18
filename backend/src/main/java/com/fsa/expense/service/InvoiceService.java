@@ -29,6 +29,7 @@ public class InvoiceService {
     private final AiExtractionClient aiExtractionClient;
     private final AuditValidationService auditValidationService;
     private final com.fsa.expense.auth.TenantRepository tenants;
+    private final com.fsa.expense.intake.InvoiceXmlParser xmlParser;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public InvoiceService(InvoiceRepository invoiceRepository,
@@ -37,7 +38,8 @@ public class InvoiceService {
                           FileStorageService fileStorageService,
                           AiExtractionClient aiExtractionClient,
                           AuditValidationService auditValidationService,
-                          com.fsa.expense.auth.TenantRepository tenants) {
+                          com.fsa.expense.auth.TenantRepository tenants,
+                          com.fsa.expense.intake.InvoiceXmlParser xmlParser) {
         this.invoiceRepository = invoiceRepository;
         this.lineItemRepository = lineItemRepository;
         this.errorLogRepository = errorLogRepository;
@@ -45,6 +47,7 @@ public class InvoiceService {
         this.aiExtractionClient = aiExtractionClient;
         this.auditValidationService = auditValidationService;
         this.tenants = tenants;
+        this.xmlParser = xmlParser;
     }
 
     @Transactional
@@ -144,9 +147,30 @@ public class InvoiceService {
         return list.stream().map(this::toDto).collect(Collectors.toList());
     }
 
+    @Transactional
     public InvoiceResponseDto getInvoiceById(Long id) {
         Invoice invoice = invoiceRepository.findById(id)
                 .orElseThrow(() -> com.fsa.expense.auth.AuthService.error(404, "Không tìm thấy hóa đơn"));
+        if ((invoice.getLineItems() == null || invoice.getLineItems().isEmpty())
+                && "XML".equalsIgnoreCase(invoice.getFileType())
+                && invoice.getFilePath() != null) {
+            try {
+                java.nio.file.Path path = fileStorageService.getFilePath(invoice.getFilePath());
+                if (java.nio.file.Files.exists(path)) {
+                    byte[] bytes = java.nio.file.Files.readAllBytes(path);
+                    Invoice parsed = xmlParser.parse(bytes);
+                    if (parsed.getLineItems() != null && !parsed.getLineItems().isEmpty()) {
+                        for (InvoiceLineItem item : parsed.getLineItems()) {
+                            item.setInvoice(invoice);
+                            invoice.getLineItems().add(item);
+                        }
+                        invoice = invoiceRepository.save(invoice);
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("Không thể trích xuất lại mặt hàng từ XML cho hóa đơn #{}: {}", id, e.getMessage());
+            }
+        }
         return toDto(invoice);
     }
 

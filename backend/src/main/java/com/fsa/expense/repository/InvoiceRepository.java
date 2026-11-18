@@ -48,6 +48,16 @@ public interface InvoiceRepository extends JpaRepository<Invoice, Long> {
             .sorted(java.util.Comparator.comparing(Invoice::getId)).toList();
     }
 
+    default List<com.fsa.expense.service.InvoiceSimilarity.MatchResult> findSimilarInvoices(Invoice invoice, Long excludeId) {
+        if (invoice == null) return List.of();
+        return findAll().stream()
+            .filter(i -> !java.util.Objects.equals(i.getId(), excludeId))
+            .map(i -> com.fsa.expense.service.InvoiceSimilarity.compare(invoice, i))
+            .filter(java.util.Objects::nonNull)
+            .sorted(java.util.Comparator.comparingInt(com.fsa.expense.service.InvoiceSimilarity.MatchResult::score).reversed())
+            .toList();
+    }
+
     @Query("SELECT i FROM Invoice i WHERE i.tenantId = ?#{T(com.fsa.expense.auth.TenantContext).id()} AND i.contentHash = :contentHash AND (:excludeId IS NULL OR i.id != :excludeId) AND i.status != 'REJECTED'")
     List<Invoice> findByContentHashExcluding(
             @Param("contentHash") String contentHash,
@@ -57,7 +67,7 @@ public interface InvoiceRepository extends JpaRepository<Invoice, Long> {
     @Query("SELECT SUM(i.totalAmount) FROM Invoice i WHERE i.tenantId = ?#{T(com.fsa.expense.auth.TenantContext).id()} AND i.status = 'APPROVED'")
     BigDecimal sumApprovedTotalAmount();
 
-    @Query("SELECT i.category, SUM(i.totalAmount), COUNT(i) FROM Invoice i WHERE i.tenantId = ?#{T(com.fsa.expense.auth.TenantContext).id()} AND i.status = 'APPROVED' GROUP BY i.category")
+    @Query("SELECT i.category, SUM(i.totalAmount), COUNT(i) FROM Invoice i WHERE i.tenantId = ?#{T(com.fsa.expense.auth.TenantContext).id()} AND i.status = 'APPROVED' GROUP BY i.category ORDER BY SUM(i.totalAmount) DESC")
     List<Object[]> getSpendByCategory();
 
     @Query("SELECT i.vendorName, SUM(i.totalAmount), COUNT(i) FROM Invoice i WHERE i.tenantId = ?#{T(com.fsa.expense.auth.TenantContext).id()} AND i.status = 'APPROVED' GROUP BY i.vendorName ORDER BY SUM(i.totalAmount) DESC")

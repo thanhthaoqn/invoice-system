@@ -117,19 +117,16 @@ public class AuditValidationService {
     }
 
     public void auditDuplicate(Invoice invoice) {
-        if (invoice.getInvoiceNumber() == null || invoice.getInvoiceNumber().isBlank()
-                || invoice.getTaxCode() == null || invoice.getTaxCode().isBlank()
-                || invoice.getInvoiceSeries() == null || invoice.getInvoiceSeries().isBlank()) {
-            invoice.setDuplicateSuspected(false);
-            invoice.setDuplicateWarningMessage(null);
+        if (invoice == null) {
             return;
         }
 
+        // 1. Kiểm tra Exact match thông qua findPotentialDuplicates
         List<Invoice> existingDuplicates = invoiceRepository.findPotentialDuplicates(
-                invoice.getInvoiceNumber().trim(),
-                invoice.getTaxCode().trim(),
+                invoice.getInvoiceNumber() != null ? invoice.getInvoiceNumber().trim() : "",
+                invoice.getTaxCode() != null ? invoice.getTaxCode().trim() : "",
                 invoice.getInvoiceTemplate(),
-                invoice.getInvoiceSeries().trim(),
+                invoice.getInvoiceSeries() != null ? invoice.getInvoiceSeries().trim() : "",
                 invoice.getId()
         );
 
@@ -147,10 +144,29 @@ public class AuditValidationService {
             );
             invoice.setDuplicateWarningMessage(warningMsg);
             log.warn("Invoice duplicate detected: {}", warningMsg);
-        } else {
-            invoice.setDuplicateSuspected(false);
-            invoice.setDuplicateWarningMessage(null);
+            return;
         }
+
+        // 2. Kiểm tra Fuzzy match (Độ tương đồng >= 90%)
+        List<com.fsa.expense.service.InvoiceSimilarity.MatchResult> similar = invoiceRepository.findSimilarInvoices(invoice, invoice.getId());
+        if (!similar.isEmpty()) {
+            com.fsa.expense.service.InvoiceSimilarity.MatchResult match = similar.get(0);
+            invoice.setDuplicateSuspected(true);
+            String warningMsg = String.format(
+                    "Cảnh báo nghi ngờ trùng lặp (Độ trùng khớp %d%%): %s với Hóa đơn ID #%d (nộp ngày %s bởi '%s'). Kế toán cần đối soát cẩn thận tránh thanh toán 2 lần.",
+                    match.score(),
+                    match.reason(),
+                    match.candidate().getId(),
+                    match.candidate().getCreatedAt() != null ? match.candidate().getCreatedAt().toLocalDate() : "trước đây",
+                    match.candidate().getSubmittedBy() != null ? match.candidate().getSubmittedBy() : "Nhân viên khác"
+            );
+            invoice.setDuplicateWarningMessage(warningMsg);
+            log.warn("Fuzzy invoice duplicate suspected ({}%): {}", match.score(), warningMsg);
+            return;
+        }
+
+        invoice.setDuplicateSuspected(false);
+        invoice.setDuplicateWarningMessage(null);
     }
 
     public void auditCashlessThreshold(Invoice invoice) {
@@ -192,6 +208,10 @@ public class AuditValidationService {
     }
 
     public void auditAccountingMapping(Invoice invoice) {
+        if (invoice.getCategory() == null || "Chi phí Dịch vụ / Khác".equals(invoice.getCategory())) {
+            String proper = InvoiceCategoryClassifier.classify(invoice);
+            invoice.setCategory(proper);
+        }
         String cat = invoice.getCategory() != null ? invoice.getCategory().trim() : "";
         BigDecimal total = invoice.getTotalAmount() != null ? invoice.getTotalAmount() : BigDecimal.ZERO;
 

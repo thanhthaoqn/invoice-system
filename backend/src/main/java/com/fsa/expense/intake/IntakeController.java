@@ -24,7 +24,13 @@ public class IntakeController {
     public record PdfDraft(long version,com.fsa.expense.dto.AiExtractionDto data) {}
     @GetMapping("/items/{id}/draft") public PdfDraft draft(@PathVariable Long id) throws com.fasterxml.jackson.core.JsonProcessingException {
         IntakeItem item=item(id);
-        if (!"PDF".equals(item.getDocumentType()) || item.getDraftJson()==null) throw AuthService.error(409,"Chưa có dữ liệu trích xuất PDF");
+        if (!"PDF".equals(item.getDocumentType())) throw AuthService.error(409,"Tài liệu không phải PDF");
+        if (item.getDraftJson() == null) {
+            var empty = new com.fsa.expense.dto.AiExtractionDto();
+            empty.setExtractionMethod("MANUAL_ENTRY");
+            empty.setNotes("PDF dạng scan/ảnh (không có lớp chữ); chưa có dữ liệu OCR tự động. Vui lòng đối chiếu bản PDF bên trái và bổ sung các trường có dấu * trước khi xác nhận.");
+            return new PdfDraft(item.getVersion(), empty);
+        }
         return new PdfDraft(item.getVersion(),json.readValue(item.getDraftJson(),com.fsa.expense.dto.AiExtractionDto.class));
     }
     @PutMapping("/items/{id}/draft") public PdfDraft saveDraft(@PathVariable Long id,@RequestBody PdfDraft draft) throws com.fasterxml.jackson.core.JsonProcessingException {

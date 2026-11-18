@@ -34,7 +34,7 @@ axios.interceptors.response.use(response => response, error => {
 export interface Tenant { id: number; name: string; taxCode: string; status: string; subscriptionStatus: string }
 export interface Session { username: string; tenants: Tenant[]; tenantId: number | null; invoiceCreate: boolean; invoiceReview: boolean; csrfToken: string }
 export interface IntakeLimits { maxFiles: number; maxFileBytes: number; maxBatchBytes: number; maxEntries: number; maxExpandedBytes: number; maxCompressionRatio: number; maxAttempts: number; maxPdfPages: number }
-export interface IntakeItem { id: number; fileName: string; fileSize: number; xmlDocument: boolean; documentType?: string; retryable: boolean; state: string; message: string; invoiceId: number | null; originalItemId: number | null; attempts: number }
+export interface IntakeItem { id: number; fileName: string; fileSize: number; xmlDocument: boolean; documentType?: string; retryable: boolean; state: string; message: string; invoiceId: number | null; originalItemId: number | null; attempts: number; contentHash?: string; }
 export interface UploadResult { session: { id: number; tenantId: number; submittedBy: string; createdAt: string; uploadedFiles: number; state: string }; items: IntakeItem[]; counts: Record<string, number> }
 export const errorMessage = (error: unknown): string => axios.isAxiosError(error) ? error.response?.data?.message || 'Không kết nối được máy chủ. Kiểm tra lịch sử trước khi gửi lại.' : 'Thao tác chưa hoàn tất.';
 export interface PdfLine { item_name: string; quantity: number | null; unit_price: number | null; amount: number | null; vat_rate: string | null }
@@ -43,7 +43,7 @@ export interface PdfData {
   vendor_name: string | null; tax_code: string | null; seller_address: string | null;
   buyer_name: string | null; buyer_tax_code: string | null; buyer_address: string | null; currency: string | null;
   subtotal_amount: number | null; vat_amount: number | null; total_amount: number | null; line_items: PdfLine[];
-  extraction_method?: string;
+  extraction_method?: string; raw_text?: string; notes?: string;
 }
 export interface PdfDraft { version: number; data: PdfData }
 async function saveSession(request: Promise<{ data: Session }>): Promise<Session> {

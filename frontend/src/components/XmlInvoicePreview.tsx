@@ -38,7 +38,7 @@ export function XmlInvoicePreview({ source }: { source: string }) {
     if (data.length !== 1) return null;
     const common = child(data[0], 'TTChung');
     const body = child(data[0], 'NDHDon');
-    const goods = child(body, 'DSHHDVu');
+    const goods = child(body, 'DSHHDVu') || child(body, 'DSHHang');
     return {
       common,
       seller: child(body, 'NBan'),

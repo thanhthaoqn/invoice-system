@@ -64,9 +64,12 @@ public class InvoiceXmlParser {
                 .fileType("XML").extractionMethod("XML_IMPORT").validationState("NOT_CHECKED")
                 .build();
             Element goods = child(body, "DSHHDVu");
+            if (goods == null) goods = child(body, "DSHHang");
+            if (goods == null && data != null) goods = child(data, "DSHHDVu");
+            if (goods == null && data != null) goods = child(data, "DSHHang");
             if (goods != null) {
                 for (Node n = goods.getFirstChild(); n != null; n = n.getNextSibling()) {
-                    if (n instanceof Element item && "HHDVu".equalsIgnoreCase(item.getLocalName())) {
+                    if (n instanceof Element item && matches(item, "HHDVu")) {
                         // Notes, discounts and commercial descriptions are not ordinary goods lines.
                         String nature = text(item, "TChat", 10);
                         if (!nature.isEmpty() && !"1".equals(nature)) continue;
@@ -80,6 +83,7 @@ public class InvoiceXmlParser {
                     }
                 }
             }
+            invoice.setCategory(com.fsa.expense.service.InvoiceCategoryClassifier.classify(invoice.getVendorName(), invoice.getLineItems()));
             invoice.setIdentityKey(com.fsa.expense.service.InvoiceIdentity.key(invoice.getTaxCode(), invoice.getInvoiceTemplate(), invoice.getInvoiceSeries(), invoice.getInvoiceNumber()));
             invoice.setSignatureState(signatureState(root));
             return invoice;
@@ -88,9 +92,18 @@ public class InvoiceXmlParser {
             throw new IllegalArgumentException("XML không hợp lệ hoặc ngày lập không đúng định dạng", e);
         }
     }
+    private static boolean matches(Element e, String name) {
+        if (e == null) return false;
+        String ln = e.getLocalName();
+        String tn = e.getTagName();
+        String nn = e.getNodeName();
+        return (ln != null && name.equalsIgnoreCase(ln))
+                || (tn != null && name.equalsIgnoreCase(tn))
+                || (nn != null && name.equalsIgnoreCase(nn));
+    }
     private Element descendant(Element root, String name) {
         NodeList list = root.getElementsByTagName("*");Element found=null;
-        for(int i=0;i<list.getLength();i++)if(list.item(i) instanceof Element e && name.equalsIgnoreCase(e.getLocalName())){
+        for(int i=0;i<list.getLength();i++)if(list.item(i) instanceof Element e && matches(e, name)){
             if(found!=null)return null;found=e;
         }
         return found;
@@ -98,7 +111,7 @@ public class InvoiceXmlParser {
     private Element child(Element parent, String name) {
         if (parent == null) return null;
         for (Node n = parent.getFirstChild(); n != null; n = n.getNextSibling())
-            if (n instanceof Element e && name.equalsIgnoreCase(e.getLocalName())) return e;
+            if (n instanceof Element e && matches(e, name)) return e;
         return null;
     }
     private String text(Element parent, String name, int limit) {

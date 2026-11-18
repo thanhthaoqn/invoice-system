@@ -52,6 +52,7 @@ public class PdfInvoiceMapper {
                     .lineNumber(invoice.getLineItems().size()+1).build());
             }
         }
+        invoice.setCategory(com.fsa.expense.service.InvoiceCategoryClassifier.classify(invoice.getVendorName(), invoice.getLineItems()));
         invoice.setIdentityKey(com.fsa.expense.service.InvoiceIdentity.key(invoice.getTaxCode(), invoice.getInvoiceTemplate(), invoice.getInvoiceSeries(), invoice.getInvoiceNumber()));
         return invoice;
     }
