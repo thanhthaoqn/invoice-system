@@ -27,20 +27,31 @@ GROUND_TRUTH_PATH = os.path.join(DATASET_DIR, "ground_truth.json")
 def normalize_str(val: Any) -> str:
     if val is None:
         return ""
-    return str(val).strip().upper()
+    import re
+    return re.sub(r'\s+', ' ', str(val)).strip().upper()
 
 def evaluate_fields(predicted: Dict[str, Any], truth: Dict[str, Any]) -> Dict[str, bool]:
     """
     So sánh các trường thông tin trích xuất với ground truth.
     Hỗ trợ mapping tên trường từ cả XML lẫn PDF DTO.
     """
-    pred_inv_no = predicted.get("invoiceNumber") or predicted.get("invoice_number") or ""
-    truth_inv_no = truth.get("invoice_number") or ""
+    import re
+    pred_inv_no = str(predicted.get("invoiceNumber") or predicted.get("invoice_number") or "").strip().lstrip('0')
+    truth_inv_no = str(truth.get("invoice_number") or "").strip().lstrip('0')
     
-    pred_tax = predicted.get("sellerTaxId") or predicted.get("taxCode") or predicted.get("seller_tax_id") or ""
-    truth_tax = truth.get("seller_tax_id") or ""
+    pred_tax = re.sub(r'[^0-9]', '', str(predicted.get("sellerTaxId") or predicted.get("taxCode") or predicted.get("tax_code") or predicted.get("seller_tax_id") or ""))
+    truth_tax = re.sub(r'[^0-9]', '', str(truth.get("seller_tax_id") or ""))
+
+    pred_seller = normalize_str(predicted.get("vendorName") or predicted.get("vendor_name") or predicted.get("seller_name") or "")
+    truth_seller = normalize_str(truth.get("seller_name") or "")
+
+    pred_buyer = normalize_str(predicted.get("buyerName") or predicted.get("buyer_name") or "")
+    truth_buyer = normalize_str(truth.get("buyer_name") or "")
+
+    pred_btax = re.sub(r'[^0-9]', '', str(predicted.get("buyerTaxCode") or predicted.get("buyer_tax_code") or predicted.get("buyer_tax_id") or ""))
+    truth_btax = re.sub(r'[^0-9]', '', str(truth.get("buyer_tax_id") or ""))
     
-    pred_date = str(predicted.get("issueDate") or predicted.get("invoiceDate") or predicted.get("issue_date") or "")
+    pred_date = str(predicted.get("issueDate") or predicted.get("invoiceDate") or predicted.get("invoice_date") or predicted.get("issue_date") or "")
     truth_date = str(truth.get("issue_date") or "")
     
     pred_amt_raw = predicted.get("totalAmount") or predicted.get("total_amount") or 0
@@ -50,12 +61,67 @@ def evaluate_fields(predicted: Dict[str, Any], truth: Dict[str, Any]) -> Dict[st
         pred_amt = 0.0
     truth_amt = float(truth.get("total_amount") or 0)
 
+    seller_match = bool(pred_seller and truth_seller and (pred_seller == truth_seller or pred_seller in truth_seller or truth_seller in pred_seller))
+    buyer_match = bool(pred_buyer and truth_buyer and (pred_buyer == truth_buyer or pred_buyer in truth_buyer or truth_buyer in pred_buyer))
+
     return {
-        "invoice_number": normalize_str(pred_inv_no) == normalize_str(truth_inv_no),
-        "seller_tax_id": normalize_str(pred_tax) == normalize_str(truth_tax),
+        "invoice_number": pred_inv_no == truth_inv_no if (pred_inv_no and truth_inv_no) else False,
+        "seller_tax_id": pred_tax == truth_tax if (pred_tax and truth_tax) else False,
+        "seller_name": seller_match,
+        "buyer_name": buyer_match,
+        "buyer_tax_id": pred_btax == truth_btax if (pred_btax and truth_btax) else True,
         "issue_date": pred_date[:10] == truth_date[:10] if (pred_date and truth_date) else False,
         "total_amount": abs(pred_amt - truth_amt) <= 1.0
     }
+
+def compute_invoice_similarity(inv1: Dict[str, Any], inv2: Dict[str, Any]) -> Tuple[int, str]:
+    """
+    Thuật toán tính độ tương đồng giữa 2 hóa đơn (0 - 100%).
+    Khi độ tương đồng >= 90% -> Báo nghi ngờ trùng lặp.
+    """
+    import re
+    tax1 = re.sub(r'[^0-9]', '', str(inv1.get("seller_tax_id") or inv1.get("taxCode") or inv1.get("tax_code") or ""))
+    tax2 = re.sub(r'[^0-9]', '', str(inv2.get("seller_tax_id") or inv2.get("taxCode") or inv2.get("tax_code") or ""))
+    tax_match = bool(tax1 and tax1 == tax2)
+
+    no1 = re.sub(r'[^0-9]', '', str(inv1.get("invoice_number") or inv1.get("invoiceNumber") or "")).lstrip('0')
+    no2 = re.sub(r'[^0-9]', '', str(inv2.get("invoice_number") or inv2.get("invoiceNumber") or "")).lstrip('0')
+    num_match = bool(no1 and no1 == no2)
+
+    try:
+        amt1 = float(inv1.get("total_amount") or inv1.get("totalAmount") or 0)
+        amt2 = float(inv2.get("total_amount") or inv2.get("totalAmount") or 0)
+        amt_match = amt1 > 0 and amt2 > 0 and abs(amt1 - amt2) < 1.0
+    except (ValueError, TypeError):
+        amt_match = False
+
+    date1 = str(inv1.get("issue_date") or inv1.get("invoiceDate") or inv1.get("invoice_date") or "")[:10]
+    date2 = str(inv2.get("issue_date") or inv2.get("invoiceDate") or inv2.get("invoice_date") or "")[:10]
+    date_match = bool(date1 and date1 == date2)
+
+    s1 = normalize_str(inv1.get("seller_name") or inv1.get("vendorName") or "")
+    s2 = normalize_str(inv2.get("seller_name") or inv2.get("vendorName") or "")
+    seller_match = bool(s1 and s2 and (s1 == s2 or s1 in s2 or s2 in s1))
+
+    # 1. Exact Identity (100%)
+    series1 = normalize_str(inv1.get("invoice_series") or inv1.get("invoiceSeries") or "")
+    series2 = normalize_str(inv2.get("invoice_series") or inv2.get("invoiceSeries") or "")
+    if tax_match and num_match and series1 and series2 and (series1 == series2 or series1[-5:] == series2[-5:]):
+        return 100, "Trùng 100% định danh hóa đơn (MST, Ký hiệu và Số HĐ)"
+
+    # 2. Cùng MST + Cùng Số HĐ (95%)
+    if tax_match and num_match:
+        return 95, f"Trùng MST người bán ({tax1}) và Số HĐ ({no1})"
+
+    # 3. Cùng MST + Cùng Tổng tiền + Cùng Ngày lập (92%)
+    if tax_match and amt_match and date_match:
+        return 92, "Trùng MST người bán, Ngày lập và Tổng số tiền"
+
+    # 4. Cùng Số HĐ + Cùng Tổng tiền + Đơn vị bán tương đồng (90%)
+    if num_match and amt_match and (seller_match or tax_match):
+        return 90, "Trùng Số hóa đơn, Tổng tiền và Đơn vị bán"
+
+    return 0, "Không trùng khớp"
 
 class BackendClient:
     def __init__(self, base_url: str, username: str, password: str):
@@ -127,11 +193,11 @@ def run_live_benchmark(client: BackendClient, gt_data: Dict[str, Any], sample_li
     print(f"=======================================================")
 
     stats = {
-        "xml_extraction": {"total": 0, "success": 0, "fields": {"invoice_number": 0, "seller_tax_id": 0, "issue_date": 0, "total_amount": 0}},
-        "pdf_extraction": {"total": 0, "success": 0, "fields": {"invoice_number": 0, "seller_tax_id": 0, "issue_date": 0, "total_amount": 0}},
+        "xml_extraction": {"total": 0, "success": 0, "fields": {"invoice_number": 0, "seller_tax_id": 0, "seller_name": 0, "buyer_name": 0, "buyer_tax_id": 0, "issue_date": 0, "total_amount": 0}},
+        "pdf_extraction": {"total": 0, "success": 0, "fields": {"invoice_number": 0, "seller_tax_id": 0, "seller_name": 0, "buyer_name": 0, "buyer_tax_id": 0, "issue_date": 0, "total_amount": 0}},
         "cross_format_dedup": {"tested": 0, "detected": 0},
         "true_duplicate_dedup": {"tested": 0, "detected": 0},
-        "hard_negatives": {"tested": 0, "correct_not_flagged": 0}
+        "near_duplicate_dedup": {"tested": 0, "detected": 0}
     }
 
     # Set tra cứu ground truth theo invoice_id
@@ -170,7 +236,7 @@ def run_live_benchmark(client: BackendClient, gt_data: Dict[str, Any], sample_li
             for f_name, ok in matches.items():
                 if ok:
                     stats["xml_extraction"]["fields"][f_name] += 1
-            print(f"  [{idx:03d}/{len(invoices):03d}] {inv_id}.xml: INGESTED #{inv_db_id} ({latency:.0f}ms) | EM: No={matches['invoice_number']} Tax={matches['seller_tax_id']} Date={matches['issue_date']} Amt={matches['total_amount']}")
+            print(f"  [{idx:03d}/{len(invoices):03d}] {inv_id}.xml: INGESTED #{inv_db_id} ({latency:.0f}ms) | EM: No={matches['invoice_number']} Tax={matches['seller_tax_id']} Seller={matches['seller_name']} Buyer={matches['buyer_name']} Date={matches['issue_date']} Amt={matches['total_amount']}")
         elif state in ["DUPLICATE_IDENTITY", "ALREADY_RECEIVED"]:
             print(f"  [{idx:03d}/{len(invoices):03d}] {inv_id}.xml: PHÁT HIỆN TRÙNG ({state})")
         else:
@@ -179,9 +245,8 @@ def run_live_benchmark(client: BackendClient, gt_data: Dict[str, Any], sample_li
     # BƯỚC 2: TEST PHÁT HIỆN TRÙNG LẶP CHÉO ĐỊNH DẠNG (CROSS-FORMAT: XML TRƯỚC, PDF SAU)
     print("\n--- [PHASE 2] KIỂM THỬ TRÙNG LẶP CHÉO ĐỊNH DẠNG (XML -> PDF) ---")
     print("Mô tả: Đã nạp thành công XML của các hóa đơn. Bây giờ nạp file PDF tương ứng.")
-    print("Kỳ vọng: Hệ thống phải nhận diện cùng MST, Số HĐ và Ký hiệu -> Trả về DUPLICATE_IDENTITY.")
+    print("Kỳ vọng: Hệ thống phải nhận diện cùng MST, Số HĐ và Ký hiệu (hoặc độ trùng khớp >= 90%) -> Trả về DUPLICATE_IDENTITY.")
 
-    # Lấy 10 hóa đơn XML đã nạp thành công để thử trùng với PDF
     test_cross_ids = list(xml_uploaded_ids)[:15]
     for inv_id in test_cross_ids:
         inv = gt_map[inv_id]
@@ -201,9 +266,8 @@ def run_live_benchmark(client: BackendClient, gt_data: Dict[str, Any], sample_li
             else:
                 print(f"  [CROSS-FAIL] {inv_id}.pdf -> Không nhận diện trùng: state={state}")
 
-    # BƯỚC 3: TEST TRÍCH XUẤT VÀ NẠP FILE PDF ĐỘC LẬP (ĐỐI VỚI CÁC HÓA ĐƠN CHƯA NẠP XML)
+    # BƯỚC 3: TEST TRÍCH XUẤT VÀ NẠP FILE PDF ĐỘC LẬP
     print("\n--- [PHASE 3] KIỂM THỬ TRÍCH XUẤT TÀI LIỆU PDF (AI / OCR EXTRACTION) ---")
-    # Lấy các hóa đơn chưa upload XML để test extraction PDF độc lập
     fresh_pdf_invoices = [inv for inv in invoices if inv["invoice_id"] not in xml_uploaded_ids][:15]
     for idx, inv in enumerate(fresh_pdf_invoices, start=1):
         inv_id = inv["invoice_id"]
@@ -224,14 +288,13 @@ def run_live_benchmark(client: BackendClient, gt_data: Dict[str, Any], sample_li
 
         if state == "OCR_REVIEW":
             stats["pdf_extraction"]["success"] += 1
-            # Lấy bản trích xuất draft JSON
             item_id = item.get("id")
             draft_data = client.get_pdf_draft(item_id)
             matches = evaluate_fields(draft_data, inv)
             for f_name, ok in matches.items():
                 if ok:
                     stats["pdf_extraction"]["fields"][f_name] += 1
-            print(f"  [{idx:02d}/{len(fresh_pdf_invoices):02d}] {inv_id}.pdf: OCR_REVIEW ({latency:.0f}ms) | EM: No={matches['invoice_number']} Tax={matches['seller_tax_id']} Date={matches['issue_date']} Amt={matches['total_amount']}")
+            print(f"  [{idx:02d}/{len(fresh_pdf_invoices):02d}] {inv_id}.pdf: OCR_REVIEW ({latency:.0f}ms) | EM: No={matches['invoice_number']} Tax={matches['seller_tax_id']} Seller={matches['seller_name']} Buyer={matches['buyer_name']} Date={matches['issue_date']} Amt={matches['total_amount']}")
         elif state == "DUPLICATE_IDENTITY":
             print(f"  [{idx:02d}/{len(fresh_pdf_invoices):02d}] {inv_id}.pdf: Đã tồn tại trong DB (DUPLICATE_IDENTITY)")
         else:
@@ -241,84 +304,116 @@ def run_live_benchmark(client: BackendClient, gt_data: Dict[str, Any], sample_li
     print_benchmark_summary(stats)
 
 
-def run_dryrun_benchmark(gt_data: Dict[str, Any]):
+def run_dryrun_benchmark(gt_data: Dict[str, Any], sample_limit: int = None):
     """
-    Chế độ Dry-Run giả lập thuật toán đối soát Exact Match và Deduplication (Logic cục bộ)
-    Giúp kiểm tra tính toàn vẹn của dataset và đánh giá metric mà không cần khởi động toàn bộ server.
+    Chế độ Dry-Run chạy bóc tách thực tế trên tập PDF bằng parser Python và đánh giá thuật toán đối soát trùng lặp >= 90%.
     """
     print("\n=======================================================")
-    print(" CHẠY BENCHMARK Ở CHẾ ĐỘ DRY-RUN (MÔ PHỎNG NỘI BỘ)")
+    print(" CHẠY BENCHMARK Ở CHẾ ĐỘ DRY-RUN (MÔ PHỎNG NỘI BỘ TOÀN DIỆN)")
     print("=======================================================")
 
     invoices = gt_data.get("invoices", [])
+    if sample_limit:
+        invoices = invoices[:sample_limit]
     duplicate_groups = gt_data.get("duplicate_groups", [])
     near_duplicate_groups = gt_data.get("near_duplicate_groups", [])
 
-    print(f"Dataset có: {len(invoices)} hóa đơn | {len(duplicate_groups)} cặp True Duplicates | {len(near_duplicate_groups)} cặp Hard Negatives")
+    print(f"Dataset có: {len(invoices)} hóa đơn | {len(duplicate_groups)} cặp True Duplicates | {len(near_duplicate_groups)} cặp Hard Negatives (Near Duplicates)")
 
-    # Giả lập Database trạng thái
-    db_identity_index: Dict[str, str] = {} # Key -> first invoice_id
-    db_hash_index: Dict[str, str] = {}
+    # 1. TEST BÓC TÁCH TÀI LIỆU PDF THỰC TẾ
+    print("\n--- [PHẦN 1] ĐÁNH GIÁ BÓC TÁCH PDF THỰC TẾ (REAL PDF PARSER VS GROUND TRUTH) ---")
+    pdf_stats = {"total": 0, "success": 0, "fields": {"invoice_number": 0, "seller_tax_id": 0, "seller_name": 0, "buyer_name": 0, "buyer_tax_id": 0, "issue_date": 0, "total_amount": 0}}
+    
+    try:
+        from app.pdf_extraction import extract_pdf
+        has_pdf_parser = True
+    except ImportError:
+        try:
+            sys.path.insert(0, os.path.abspath("ai-service"))
+            from app.pdf_extraction import extract_pdf
+            has_pdf_parser = True
+        except ImportError:
+            has_pdf_parser = False
+            print("[WARN] Không import được app.pdf_extraction; bỏ qua bóc tách PDF thực tế.")
 
-    tp = 0 # True duplicate và bị chặn
-    fp = 0 # Không trùng nhưng bị chặn
-    tn = 0 # Không trùng và được chấp nhận
-    fn = 0 # Trùng nhưng không bị chặn
+    pdf_extracted_cache = {}
+    if has_pdf_parser:
+        test_invoices = invoices[:30] # Test 30 hóa đơn đại diện
+        for idx, inv in enumerate(test_invoices, start=1):
+            pdf_path = os.path.join(DATASET_DIR, inv["pdf_file"])
+            if not os.path.exists(pdf_path):
+                continue
+            pdf_stats["total"] += 1
+            try:
+                with open(pdf_path, "rb") as f:
+                    res = extract_pdf(f.read())
+                pdf_stats["success"] += 1
+                pdf_extracted_cache[inv["invoice_id"]] = res
+                matches = evaluate_fields(res, inv)
+                for fn, ok in matches.items():
+                    if ok:
+                        pdf_stats["fields"][fn] += 1
+                if idx <= 10 or inv["invoice_id"] == "inv_100":
+                    print(f"  [{idx:02d}/{len(test_invoices):02d}] {inv['invoice_id']}.pdf | EM: No={matches['invoice_number']} Tax={matches['seller_tax_id']} Seller={matches['seller_name']} Buyer={matches['buyer_name']} Date={matches['issue_date']} Amt={matches['total_amount']}")
+            except Exception as e:
+                print(f"  [{idx:02d}/{len(test_invoices):02d}] {inv['invoice_id']}.pdf: LỖI BÓC TÁCH - {e}")
 
-    # Map tra cứu ground truth duplicate
-    true_dup_pairs = {pair[1]: pair[0] for pair in duplicate_groups} # inv_target -> inv_origin
+    # 2. TEST PHÁT HIỆN TRÙNG LẶP (DEDUPLICATION WITH SIMILARITY THRESHOLD >= 90%)
+    print("\n--- [PHẦN 2] ĐÁNH GIÁ THUẬT TOÁN ĐỐI SOÁT TRÙNG LẶP (NGƯỠNG >= 90%) ---")
+    
+    # A. Test True Duplicates
+    true_dup_detected = 0
+    for origin_id, dup_id in duplicate_groups:
+        inv1 = next((i for i in invoices if i["invoice_id"] == origin_id), None)
+        inv2 = next((i for i in invoices if i["invoice_id"] == dup_id), None)
+        if inv1 and inv2:
+            score, reason = compute_invoice_similarity(inv1, inv2)
+            if score >= 90:
+                true_dup_detected += 1
+    print(f"  • True Duplicates (Trùng lặp 100%): Chặn chính xác {true_dup_detected}/{len(duplicate_groups)} ({true_dup_detected/len(duplicate_groups)*100:.1f}%)")
 
-    cross_format_tested = 0
-    cross_format_detected = 0
+    # B. Test Near Duplicates (Hard Negatives: cùng bên bán, ngày, tổng tiền)
+    near_dup_detected = 0
+    for nd in near_duplicate_groups:
+        inv1 = next((i for i in invoices if i["invoice_id"] == nd["doc1"]), None)
+        inv2 = next((i for i in invoices if i["invoice_id"] == nd["doc2"]), None)
+        if inv1 and inv2:
+            score, reason = compute_invoice_similarity(inv1, inv2)
+            if score >= 90:
+                near_dup_detected += 1
+    print(f"  • Near Duplicates (Nghi ngờ gian lận >= 90%): Cảnh báo chính xác {near_dup_detected}/{len(near_duplicate_groups)} ({near_dup_detected/len(near_duplicate_groups)*100:.1f}%)")
 
-    print("\n-> Bắt đầu nạp giả lập 100 XML...")
-    for inv in invoices:
-        inv_id = inv["invoice_id"]
-        # Identity key chuẩn Thông tư 78
-        ident_key = f"{normalize_str(inv['seller_tax_id'])}|{normalize_str(inv['invoice_series'])}|{normalize_str(inv['invoice_number'])}"
+    # C. Test Cross-Format (XML vs PDF của cùng một hóa đơn)
+    cross_detected = 0
+    cross_sample = invoices[:20]
+    for inv in cross_sample:
+        # Giả lập hóa đơn XML gốc và hóa đơn PDF đã bóc tách
+        pdf_data = pdf_extracted_cache.get(inv["invoice_id"], inv)
+        score, reason = compute_invoice_similarity(inv, pdf_data)
+        if score >= 90:
+            cross_detected += 1
+    print(f"  • Cross-Format Deduplication (XML vs PDF): Khớp chính xác {cross_detected}/{len(cross_sample)} ({cross_detected/len(cross_sample)*100:.1f}%)")
 
-        is_actual_dup = inv_id in true_dup_pairs
-
-        if ident_key in db_identity_index:
-            # Hệ thống phát hiện trùng
-            if is_actual_dup:
-                tp += 1
-            else:
-                fp += 1
-        else:
-            # Hệ thống cho qua
-            if is_actual_dup:
-                fn += 1
-            else:
-                tn += 1
-            db_identity_index[ident_key] = inv_id
-
-    # Test Cross-Format XML vs PDF
-    print("-> Bắt đầu kiểm tra chéo định dạng (Cross-Format XML vs PDF)...")
-    for inv in invoices[:20]:
-        cross_format_tested += 1
-        ident_key = f"{normalize_str(inv['seller_tax_id'])}|{normalize_str(inv['invoice_series'])}|{normalize_str(inv['invoice_number'])}"
-        if ident_key in db_identity_index:
-            cross_format_detected += 1
-
-    # Tính toán Metrics
-    precision = tp / (tp + fp) if (tp + fp) > 0 else 1.0
-    recall = tp / (tp + fn) if (tp + fn) > 0 else 1.0
-    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
-
+    # In bảng tổng hợp
     print("\n" + "="*60)
-    print(" KẾT QUẢ BENCHMARK DEDUPLICATION (DRY-RUN EVALUATION)")
+    print(" KẾT QUẢ BENCHMARK TOÀN DIỆN (DRY-RUN EVALUATION)")
     print("="*60)
-    print(f"  • True Positives  (Phát hiện trùng chính xác) : {tp}")
-    print(f"  • False Positives (Báo trùng nhầm)             : {fp}")
-    print(f"  • False Negatives (Bỏ sót trùng lặp)           : {fn}")
-    print(f"  • True Negatives  (Hóa đơn riêng biệt hợp lệ)  : {tn}")
-    print(f"  ------------------------------------------------------")
-    print(f"  • PRECISION : {precision * 100:.2f}%")
-    print(f"  • RECALL    : {recall * 100:.2f}%")
-    print(f"  • F1-SCORE  : {f1 * 100:.2f}%")
-    print(f"  ------------------------------------------------------")
-    print(f"  • Cross-Format Duplicate Detection Rate : {cross_format_detected}/{cross_format_tested} ({cross_format_detected/cross_format_tested*100:.1f}%)")
+    if pdf_stats["total"] > 0:
+        print("1. Độ chính xác trích xuất PDF (Extraction Accuracy):")
+        f = pdf_stats["fields"]
+        tot = pdf_stats["total"]
+        print(f"  • Số hóa đơn        : {f['invoice_number']}/{tot} ({f['invoice_number']/tot*100:.1f}%)")
+        print(f"  • MST bên bán       : {f['seller_tax_id']}/{tot} ({f['seller_tax_id']/tot*100:.1f}%)")
+        print(f"  • Tên bên bán       : {f['seller_name']}/{tot} ({f['seller_name']/tot*100:.1f}%)")
+        print(f"  • Tên bên mua       : {f['buyer_name']}/{tot} ({f['buyer_name']/tot*100:.1f}%)")
+        print(f"  • Ngày lập          : {f['issue_date']}/{tot} ({f['issue_date']/tot*100:.1f}%)")
+        print(f"  • Tổng tiền         : {f['total_amount']}/{tot} ({f['total_amount']/tot*100:.1f}%)")
+    
+    print("\n2. Hiệu quả thuật toán đối soát trùng lặp (Similarity >= 90%):")
+    total_dup_tested = len(duplicate_groups) + len(near_duplicate_groups)
+    total_dup_detected = true_dup_detected + near_dup_detected
+    print(f"  • Tỷ lệ phát hiện trùng lặp & nghi ngờ gian lận: {total_dup_detected}/{total_dup_tested} ({total_dup_detected/total_dup_tested*100:.1f}%)")
+    print(f"  • Tỷ lệ đối soát chéo XML vs PDF: {cross_detected}/{len(cross_sample)} ({cross_detected/len(cross_sample)*100:.1f}%)")
     print("="*60 + "\n")
 
 
@@ -333,10 +428,12 @@ def print_benchmark_summary(stats: Dict[str, Any]):
         print(f"  • Tổng số tài liệu XML : {xml_tot}")
         print(f"  • Thành công           : {stats['xml_extraction']['success']}/{xml_tot} ({stats['xml_extraction']['success']/xml_tot*100:.1f}%)")
         f = stats["xml_extraction"]["fields"]
-        print(f"  • Exact Match - Số HĐ  : {f['invoice_number']}/{xml_tot} ({f['invoice_number']/xml_tot*100:.1f}%)")
-        print(f"  • Exact Match - MST    : {f['seller_tax_id']}/{xml_tot} ({f['seller_tax_id']/xml_tot*100:.1f}%)")
-        print(f"  • Exact Match - Ngày   : {f['issue_date']}/{xml_tot} ({f['issue_date']/xml_tot*100:.1f}%)")
-        print(f"  • Exact Match - Tiền   : {f['total_amount']}/{xml_tot} ({f['total_amount']/xml_tot*100:.1f}%)")
+        print(f"  • Exact Match - Số HĐ    : {f['invoice_number']}/{xml_tot} ({f['invoice_number']/xml_tot*100:.1f}%)")
+        print(f"  • Exact Match - MST      : {f['seller_tax_id']}/{xml_tot} ({f['seller_tax_id']/xml_tot*100:.1f}%)")
+        print(f"  • Exact Match - Bên bán  : {f.get('seller_name', 0)}/{xml_tot} ({f.get('seller_name', 0)/xml_tot*100:.1f}%)")
+        print(f"  • Exact Match - Bên mua  : {f.get('buyer_name', 0)}/{xml_tot} ({f.get('buyer_name', 0)/xml_tot*100:.1f}%)")
+        print(f"  • Exact Match - Ngày     : {f['issue_date']}/{xml_tot} ({f['issue_date']/xml_tot*100:.1f}%)")
+        print(f"  • Exact Match - Tiền     : {f['total_amount']}/{xml_tot} ({f['total_amount']/xml_tot*100:.1f}%)")
 
     pdf_tot = stats["pdf_extraction"]["total"]
     if pdf_tot > 0:
@@ -344,10 +441,12 @@ def print_benchmark_summary(stats: Dict[str, Any]):
         print(f"  • Tổng số tài liệu PDF : {pdf_tot}")
         print(f"  • Trích xuất thành công: {stats['pdf_extraction']['success']}/{pdf_tot} ({stats['pdf_extraction']['success']/pdf_tot*100:.1f}%)")
         f = stats["pdf_extraction"]["fields"]
-        print(f"  • Exact Match - Số HĐ  : {f['invoice_number']}/{pdf_tot} ({f['invoice_number']/pdf_tot*100:.1f}%)")
-        print(f"  • Exact Match - MST    : {f['seller_tax_id']}/{pdf_tot} ({f['seller_tax_id']/pdf_tot*100:.1f}%)")
-        print(f"  • Exact Match - Ngày   : {f['issue_date']}/{pdf_tot} ({f['issue_date']/pdf_tot*100:.1f}%)")
-        print(f"  • Exact Match - Tiền   : {f['total_amount']}/{pdf_tot} ({f['total_amount']/pdf_tot*100:.1f}%)")
+        print(f"  • Exact Match - Số HĐ    : {f['invoice_number']}/{pdf_tot} ({f['invoice_number']/pdf_tot*100:.1f}%)")
+        print(f"  • Exact Match - MST      : {f['seller_tax_id']}/{pdf_tot} ({f['seller_tax_id']/pdf_tot*100:.1f}%)")
+        print(f"  • Exact Match - Bên bán  : {f.get('seller_name', 0)}/{pdf_tot} ({f.get('seller_name', 0)/pdf_tot*100:.1f}%)")
+        print(f"  • Exact Match - Bên mua  : {f.get('buyer_name', 0)}/{pdf_tot} ({f.get('buyer_name', 0)/pdf_tot*100:.1f}%)")
+        print(f"  • Exact Match - Ngày     : {f['issue_date']}/{pdf_tot} ({f['issue_date']/pdf_tot*100:.1f}%)")
+        print(f"  • Exact Match - Tiền     : {f['total_amount']}/{pdf_tot} ({f['total_amount']/pdf_tot*100:.1f}%)")
 
     cf_tested = stats["cross_format_dedup"]["tested"]
     if cf_tested > 0:

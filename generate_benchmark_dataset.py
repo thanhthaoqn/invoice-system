@@ -158,8 +158,8 @@ def build_tt78_xml(inv_data):
     ET.SubElement(nmua, "MST").text = inv_data["buyer_tax_id"]
     ET.SubElement(nmua, "DChi").text = inv_data["buyer_address"]
 
-    # DSHHang
-    dshh = ET.SubElement(nb, "DSHHang")
+    # DSHHDVu (Danh sach hang hoa dich vu theo Thong tu 78)
+    dshh = ET.SubElement(nb, "DSHHDVu")
     for it in inv_data["line_items"]:
         hh = ET.SubElement(dshh, "HHDVu")
         ET.SubElement(hh, "TChat").text = "1"

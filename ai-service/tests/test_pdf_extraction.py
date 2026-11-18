@@ -91,6 +91,32 @@ class PdfExtractionTest(unittest.TestCase):
         self.assertEqual(number('0'), 0)
         self.assertIsNone(number('not a number'))
 
+    def test_real_pdf_extraction_inv_010(self):
+        import os
+        pdf_path = os.path.join(os.path.dirname(__file__), '..', '..', 'dataset', 'pdf', 'inv_010.pdf')
+        if os.path.exists(pdf_path):
+            with open(pdf_path, 'rb') as f:
+                result = extract_pdf(f.read())
+            self.assertEqual(result['invoice_number'], '0000010')
+            self.assertEqual(result['tax_code'], '1182449353')
+            self.assertEqual(result['buyer_tax_code'], '4874016400')
+            self.assertEqual(result['line_items'][0]['vat_rate'], '10%')
+            self.assertEqual(result['line_items'][1]['vat_rate'], '8%')
+
+    def test_real_pdf_extraction_inv_100_with_discount(self):
+        import os
+        pdf_path = os.path.join(os.path.dirname(__file__), '..', '..', 'dataset', 'pdf', 'inv_100.pdf')
+        if os.path.exists(pdf_path):
+            with open(pdf_path, 'rb') as f:
+                result = extract_pdf(f.read())
+            self.assertEqual(result['invoice_number'], '0000100')
+            self.assertEqual(result['tax_code'], '7790827231-626')
+            self.assertEqual(len(result['line_items']), 4)
+            self.assertEqual(result['line_items'][0]['item_name'], 'Cap mang Cat6 AMP/CommScope')
+            self.assertEqual(result['line_items'][3]['item_name'], 'Chiet khau thuong mai 10% dong hang 1')
+            self.assertEqual(result['line_items'][3]['amount'], -3600000.0)
+
+
 
 if __name__ == '__main__':
     unittest.main()
