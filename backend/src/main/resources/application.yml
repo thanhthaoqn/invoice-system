@@ -1,0 +1,66 @@
+server:
+  port: 8088
+  servlet:
+    session:
+      timeout: 30m
+      cookie:
+        http-only: true
+        same-site: strict
+        secure: ${SESSION_COOKIE_SECURE:false}
+
+spring:
+  rabbitmq:
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    template:
+      mandatory: true
+    listener:
+      simple:
+        default-requeue-rejected: false
+  application:
+    name: smart-expense-reimbursement
+  datasource:
+    url: jdbc:postgresql://localhost:5432/coursedesk_postgres
+    username: postgres
+    password: Postgres@123
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: true
+  servlet:
+    multipart:
+      max-file-size: 25MB
+      max-request-size: 25MB
+
+app:
+  email:
+    monthly-invoice-limit: ${EMAIL_MONTHLY_INVOICE_LIMIT:0}
+    redis-enabled: ${EMAIL_REDIS_ENABLED:false}
+    ocr-async-enabled: ${EMAIL_OCR_ASYNC_ENABLED:false}
+    system-domain: ${EMAIL_SYSTEM_DOMAIN:}
+    system-host: ${EMAIL_SYSTEM_HOST:imap.gmail.com}
+    system-user: ${EMAIL_SYSTEM_USER:}
+    system-password: ${EMAIL_SYSTEM_PASSWORD:}
+    encryption-key: ${EMAIL_ENCRYPTION_KEY:}
+    imap-hosts: ${EMAIL_IMAP_HOSTS:imap.gmail.com,outlook.office365.com,imap.mail.yahoo.com}
+    download-domains: ${EMAIL_DOWNLOAD_DOMAINS:meinvoice.vn,misainvoice.vn,vnpt-invoice.com.vn,sinvoice.viettel.vn,van.ehoadon.vn}
+    webhook-secret: ${EMAIL_WEBHOOK_SECRET:}
+    tenant-id: ${EMAIL_TENANT_ID:0}
+    allowed-senders: ${EMAIL_ALLOWED_SENDERS:}
+  intake:
+    max-files: 20
+    max-file-bytes: 15728640
+    max-batch-bytes: 25165824
+    max-entries: 200
+    max-expanded-bytes: 52428800
+    max-compression-ratio: 100
+    max-attempts: 3
+    max-pdf-pages: 20
+  ai-service:
+    url: http://127.0.0.1:8000/api/extract
+  storage:
+    upload-dir: uploads/invoices
