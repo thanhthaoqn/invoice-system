@@ -58,8 +58,15 @@ public class IntakeService {
                 var matches=xmls.stream().filter(i -> stem(i.getFileName()).equalsIgnoreCase(stem(pdf.getFileName()))).toList();
                 IntakeItem match=matches.size()==1?matches.get(0):xmls.size()==1?xmls.get(0):null;
                 if(match!=null) {
-                    pdf.setInvoiceId(match.getInvoiceId()); pdf.setState("PDF_ATTACHED");
-                    pdf.setMessage("PDF hiển thị kèm hóa đơn XML; không chạy OCR"); items.save(pdf);
+                    pdf.setInvoiceId(match.getInvoiceId());
+                    if ("DUPLICATE_IDENTITY".equals(match.getState())) {
+                        pdf.setState("DUPLICATE_IDENTITY");
+                        pdf.setMessage("Trùng lặp: Đi kèm hóa đơn XML nộp trùng (" + match.getFileName() + "); không tạo mới");
+                    } else {
+                        pdf.setState("PDF_ATTACHED");
+                        pdf.setMessage("PDF hiển thị kèm hóa đơn XML; không chạy OCR");
+                    }
+                    items.save(pdf);
                 } else process(pdf);
             }
             session.setState("COMPLETED");

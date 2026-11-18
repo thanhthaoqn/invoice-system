@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { Upload, RefreshCw, X } from 'lucide-react';
+import { Upload, RefreshCw, X, GitCompare } from 'lucide-react';
 import { PdfReview } from './PdfReview';
-import { api, intakeApi, errorMessage, type Invoice, type Session, type IntakeLimits, type UploadResult } from '../services/api';
+import { DuplicateComparisonModal } from './DuplicateComparisonModal';
+import { api, intakeApi, errorMessage, type Invoice, type Session, type IntakeLimits, type UploadResult, type IntakeItem } from '../services/api';
 
 interface Props {
   session: Session;
@@ -18,6 +19,7 @@ const labels: Record<string, string> = {
   ARCHIVE_RECEIVED: 'Đã lưu ZIP', ARCHIVE_PROCESSED: 'Đã đọc ZIP', ARCHIVE_EMPTY: 'ZIP không có XML',
   ARCHIVE_FAILED: 'ZIP có lỗi', INVALID_ARCHIVE: 'Không phải ZIP hợp lệ',
   OCR_REVIEW: 'PDF chờ kiểm tra & xác nhận', OCR_FAILED: 'Chưa trích xuất được PDF',
+  PDF_ATTACHED: 'Đính kèm bản thể hiện PDF',
 };
 const size = (value: number) => `${(value / 1024 / 1024).toFixed(2)} MB`;
 export function UploadSection({ session, onInvoiceUploaded, onRefresh }: Props) {
@@ -29,6 +31,7 @@ export function UploadSection({ session, onInvoiceUploaded, onRefresh }: Props) 
   const [progress, setProgress] = useState(0);
   const [loadingHistory, setLoadingHistory] = useState(true);
   const [pdfItem, setPdfItem] = useState<number | null>(null);
+  const [duplicateComparisonItem, setDuplicateComparisonItem] = useState<IntakeItem | null>(null);
   const input = useRef<HTMLInputElement>(null);
   const lock = useRef(false);
   const tenant = session.tenants.find(value => value.id === session.tenantId);
@@ -69,19 +72,41 @@ export function UploadSection({ session, onInvoiceUploaded, onRefresh }: Props) 
       if (pendingPdf) {
         setPdfItem(pendingPdf.originalItemId || pendingPdf.id);
       } else {
-        const firstInvoice = result.items.find(i => i.invoiceId);
-        if (firstInvoice?.invoiceId) {
-          void open(firstInvoice.invoiceId);
+        const dupItem = result.items.find(i => i.state === 'DUPLICATE_IDENTITY' || i.state === 'ALREADY_RECEIVED');
+        if (dupItem) {
+          setError(`⚠️ Phát hiện trùng lặp: ${dupItem.fileName} đã trùng với hóa đơn trong hệ thống (${dupItem.message}). Hệ thống đã ngăn tạo hóa đơn mới.`);
+          if (dupItem.invoiceId) {
+            setDuplicateComparisonItem(dupItem);
+          }
+        }
+        const freshInvoice = result.items.find(i => i.invoiceId && i.state !== 'DUPLICATE_IDENTITY' && i.state !== 'ALREADY_RECEIVED');
+        if (freshInvoice?.invoiceId) {
+          void open(freshInvoice.invoiceId);
         }
       }
     } catch (err) { setError(errorMessage(err)); } finally { lock.current = false; setBusy(false); }
   };
   const open = async (id: number) => { try { onInvoiceUploaded(await api.getInvoice(id)); } catch (err) { setError(errorMessage(err)); } };
   return <div className="max-w-7xl mx-auto py-8 space-y-6">
+    {duplicateComparisonItem && (
+      <DuplicateComparisonModal
+        item={duplicateComparisonItem}
+        onClose={() => setDuplicateComparisonItem(null)}
+        onOpenOriginalInvoice={(invoiceId) => {
+          setDuplicateComparisonItem(null);
+          void open(invoiceId);
+        }}
+      />
+    )}
     {pdfItem !== null && <PdfReview key={pdfItem} itemId={pdfItem} canEdit={session.invoiceCreate} onClose={() => setPdfItem(null)} onConfirmed={item => {
       setPdfItem(null); void refresh();
-      if (item.invoiceId) void open(item.invoiceId);
-      else setError(item.message);
+      if (item.state === 'DUPLICATE_IDENTITY') {
+        setError(`⚠️ Chặn nộp trùng lặp: ${item.message}`);
+      } else if (item.invoiceId) {
+        void open(item.invoiceId);
+      } else {
+        setError(item.message);
+      }
     }} />}
     <header className="rounded-2xl border border-indigo-100 bg-gradient-to-r from-indigo-50 to-white p-8">
       <span className="text-xs font-bold uppercase tracking-wider text-indigo-600">Tiếp nhận hóa đơn · XML / PDF / ZIP</span>
@@ -117,19 +142,48 @@ export function UploadSection({ session, onInvoiceUploaded, onRefresh }: Props) 
           {(result.counts.pdfDocuments || 0) > 0 && <p className="text-sm text-indigo-700">{result.counts.pdfDocuments} PDF · {result.counts.OCR_REVIEW || 0} chờ xác nhận · {result.counts.OCR_FAILED || 0} lỗi trích xuất</p>}
           <p className="text-sm text-slate-500">{result.counts.uploadedFiles} file tải lên · {result.counts.xmlDocuments} XML · {result.counts.INGESTED} tạo mới · {result.counts.ALREADY_RECEIVED} nhận lại · {result.counts.DUPLICATE_IDENTITY} trùng · {(result.counts.PARSE_FAILED || 0) + (result.counts.PROCESSING_FAILED || 0) + (result.counts.STORAGE_FAILED || 0) + (result.counts.ARCHIVE_FAILED || 0) + (result.counts.INVALID_ARCHIVE || 0) + (result.counts.UNSUPPORTED || 0)} lỗi · {result.counts.REJECTED_OUTBOUND || 0} đầu ra</p>
           <p className="text-xs text-slate-500">{result.session.state === 'COMPLETED' ? 'Đã kết thúc xử lý lô. Xem kết quả từng tài liệu.' : 'Phiên chưa hoàn tất; cần kiểm tra kết quả.'}</p></summary>
-        <ul className="mt-4 divide-y divide-slate-100">{result.items.map(item => <li key={item.id} className="py-4 space-y-2">
-          <div className="flex flex-wrap justify-between gap-2"><span className="font-medium text-sm break-all">{item.fileName}</span><span className="text-xs font-semibold text-indigo-700">{labels[item.state] || item.state}</span></div>
-          <p className="text-sm text-slate-500">{item.message}</p>
-          <div className="flex flex-wrap items-center gap-3 text-xs">
-            {item.invoiceId && (
-              <button
-                onClick={() => void open(item.invoiceId!)}
-                className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs shadow-2xs transition"
-              >
-                Mở đối soát #{item.invoiceId}
-              </button>
-            )}
-            {(item.state === 'OCR_REVIEW' || (item.documentType === 'PDF' && item.originalItemId && !item.invoiceId)) && (
+        <ul className="mt-4 divide-y divide-slate-100">{result.items.map(item => {
+          const isDuplicateItem = (item.state === 'DUPLICATE_IDENTITY' || item.state === 'ALREADY_RECEIVED') ||
+            (item.state === 'PDF_ATTACHED' && result.items.some(o => o.invoiceId === item.invoiceId && (o.state === 'DUPLICATE_IDENTITY' || o.state === 'ALREADY_RECEIVED')));
+          return (
+            <li key={item.id} className="py-4 space-y-2">
+              <div className="flex flex-wrap justify-between gap-2">
+                <span className="font-medium text-sm break-all">{item.fileName}</span>
+                <span className={`text-xs font-semibold ${isDuplicateItem ? 'text-amber-700' : 'text-indigo-700'}`}>
+                  {isDuplicateItem ? 'Trùng danh tính hóa đơn' : (labels[item.state] || item.state)}
+                </span>
+              </div>
+              <p className="text-sm text-slate-500">
+                {item.state === 'PDF_ATTACHED' && isDuplicateItem
+                  ? 'Trùng lặp: File PDF đi kèm hóa đơn XML bị trùng lặp; không tạo mới'
+                  : item.message}
+              </p>
+              <div className="flex flex-wrap items-center gap-3 text-xs">
+                {isDuplicateItem && item.invoiceId ? (
+                  <>
+                    <button
+                      onClick={() => setDuplicateComparisonItem(item)}
+                      className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-semibold text-xs shadow-2xs transition flex items-center gap-1.5"
+                    >
+                      <GitCompare className="w-3.5 h-3.5" />
+                      Đối chiếu 2 bên (Trùng #{item.invoiceId})
+                    </button>
+                    <button
+                      onClick={() => void open(item.invoiceId!)}
+                      className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium text-xs transition"
+                    >
+                      Mở hóa đơn gốc #{item.invoiceId}
+                    </button>
+                  </>
+                ) : item.invoiceId ? (
+                  <button
+                    onClick={() => void open(item.invoiceId!)}
+                    className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs shadow-2xs transition"
+                  >
+                    Mở đối soát #{item.invoiceId}
+                  </button>
+                ) : null}
+            {(item.state === 'OCR_REVIEW' || item.state === 'OCR_FAILED' || (item.documentType === 'PDF' && item.originalItemId && !item.invoiceId)) && (
               <button
                 onClick={() => setPdfItem(item.originalItemId || item.id)}
                 className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs shadow-2xs transition"
@@ -156,7 +210,10 @@ export function UploadSection({ session, onInvoiceUploaded, onRefresh }: Props) 
                 Xử lý lại ({item.attempts}/{limits.maxAttempts})
               </button>
             )}
-          </div></li>)}</ul>
+            </div>
+          </li>
+        );
+      })}</ul>
       </details>)}</div>
     </section>
 

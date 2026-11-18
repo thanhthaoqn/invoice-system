@@ -3,12 +3,13 @@ package com.fsa.expense.service;
 import com.fsa.expense.dto.AnalyticsSummaryDto;
 import com.fsa.expense.dto.ErrorLogDto;
 import com.fsa.expense.entity.ErrorLog;
+import com.fsa.expense.entity.Invoice;
 import com.fsa.expense.entity.InvoiceStatus;
 import com.fsa.expense.repository.ErrorLogRepository;
 import com.fsa.expense.repository.InvoiceRepository;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -22,13 +23,36 @@ public class AnalyticsService {
 
     private final InvoiceRepository invoiceRepository;
     private final ErrorLogRepository errorLogRepository;
+    private final AuditValidationService auditValidationService;
 
-    public AnalyticsService(InvoiceRepository invoiceRepository, ErrorLogRepository errorLogRepository) {
+    public AnalyticsService(InvoiceRepository invoiceRepository, ErrorLogRepository errorLogRepository, AuditValidationService auditValidationService) {
         this.invoiceRepository = invoiceRepository;
         this.errorLogRepository = errorLogRepository;
+        this.auditValidationService = auditValidationService;
     }
 
+    @Transactional
     public AnalyticsSummaryDto getDashboardSummary() {
+        // Tự động phân loại lại danh mục cho các hóa đơn đang bị mặc định gộp chung
+        List<Invoice> allInvoices = invoiceRepository.findAll();
+        boolean updated = false;
+        for (Invoice inv : allInvoices) {
+            if (inv.getCategory() == null || "Chi phí Dịch vụ / Khác".equals(inv.getCategory())) {
+                String proper = InvoiceCategoryClassifier.classify(inv);
+                if (!proper.equals(inv.getCategory())) {
+                    inv.setCategory(proper);
+                    if (auditValidationService != null) {
+                        auditValidationService.auditAccountingMapping(inv);
+                    }
+                    invoiceRepository.save(inv);
+                    updated = true;
+                }
+            }
+        }
+        if (updated) {
+            invoiceRepository.flush();
+        }
+
         BigDecimal totalSpend = invoiceRepository.sumApprovedTotalAmount();
         if (totalSpend == null) totalSpend = BigDecimal.ZERO;
 

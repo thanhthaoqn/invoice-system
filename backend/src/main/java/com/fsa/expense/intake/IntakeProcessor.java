@@ -61,6 +61,22 @@ public class IntakeProcessor {
         var same = items.findFirstByTenantIdAndContentHashAndStateOrderById(tenant.getId(), item.getContentHash(), "INGESTED");
         if (same.isPresent()) {
             item.setOriginalItemId(same.get().getId()); item.setInvoiceId(same.get().getInvoiceId());
+            if (same.get().getInvoiceId() != null && "XML".equals(item.getDocumentType())) {
+                invoices.findById(same.get().getInvoiceId()).ifPresent(existing -> {
+                    if (existing.getLineItems().isEmpty()) {
+                        try {
+                            Invoice parsed = parser.parse(bytes);
+                            if (!parsed.getLineItems().isEmpty()) {
+                                for (com.fsa.expense.entity.InvoiceLineItem li : parsed.getLineItems()) {
+                                    li.setInvoice(existing);
+                                    existing.getLineItems().add(li);
+                                }
+                                invoices.saveAndFlush(existing);
+                            }
+                        } catch (Exception ignored) {}
+                    }
+                });
+            }
             return finish(item, "ALREADY_RECEIVED", "Đã tiếp nhận nội dung này trước đó");
         }
         if ("PDF".equals(item.getDocumentType())) {
@@ -80,20 +96,44 @@ public class IntakeProcessor {
                 var data=extraction.extractInvoice(new StoredPdf(bytes,baseName(item.getFileName())));
                 item.setRawExtraction(json.writeValueAsString(data)); item.setDraftJson(item.getRawExtraction());
 
-                // Chặn trùng danh tính ngay tại bước trích xuất nếu hóa đơn đã được tiếp nhận (từ XML hoặc PDF trước)
-                if (com.fsa.expense.service.InvoiceIdentity.key(data.getTaxCode(), data.getInvoiceTemplate(), data.getInvoiceSeries(), data.getInvoiceNumber()) != null) {
-                    var duplicate = findDuplicate(data.getTaxCode(), data.getInvoiceTemplate(), data.getInvoiceSeries(), data.getInvoiceNumber());
-                    if (duplicate.isPresent()) {
-                        item.setInvoiceId(duplicate.get().getId());
-                        return finish(item, "DUPLICATE_IDENTITY", "Hóa đơn này đã được tiếp nhận trong hệ thống (" + duplicate.get().getFileType() + " #" + duplicate.get().getId() + "); không tạo bản trùng.");
-                    }
+                // Chặn trùng danh tính hoặc nghi ngờ trùng lặp (>= 90%) ngay tại bước trích xuất
+                var duplicate = findDuplicate(data.getTaxCode(), data.getInvoiceTemplate(), data.getInvoiceSeries(), data.getInvoiceNumber());
+                if (duplicate.isEmpty()) {
+                    try {
+                        Invoice probe = pdfMapper.invoice(data);
+                        var similar = invoices.findSimilarInvoices(probe, null);
+                        if (!similar.isEmpty()) {
+                            duplicate = java.util.Optional.of(similar.get(0).candidate());
+                        }
+                    } catch (Exception ignored) {}
+                }
+                if (duplicate.isPresent()) {
+                    item.setInvoiceId(duplicate.get().getId());
+                    return finish(item, "DUPLICATE_IDENTITY", "Hóa đơn này đã được tiếp nhận trong hệ thống (" + duplicate.get().getFileType() + " #" + duplicate.get().getId() + "); không tạo bản trùng.");
                 }
 
-                return finish(item,"OCR_REVIEW","Đã trích xuất PDF. Kiểm tra, bổ sung trường thiếu và xác nhận để tạo hóa đơn.");
+                String msg = "PDF_SCAN_MANUAL".equals(data.getExtractionMethod())
+                    ? "PDF dạng scan/ảnh; cần đối chiếu bản gốc để bổ sung thông tin."
+                    : "Đã trích xuất PDF. Kiểm tra, bổ sung trường thiếu và xác nhận để tạo hóa đơn.";
+                return finish(item, "OCR_REVIEW", msg);
             } catch (IllegalArgumentException | IllegalStateException e) {
-                return finish(item,"OCR_FAILED",e.getMessage());
+                var empty = new com.fsa.expense.dto.AiExtractionDto();
+                empty.setExtractionMethod("MANUAL_ENTRY");
+                empty.setNotes(e.getMessage());
+                try {
+                    item.setRawExtraction(json.writeValueAsString(empty));
+                    item.setDraftJson(item.getRawExtraction());
+                } catch (Exception ignored) {}
+                return finish(item, "OCR_FAILED", e.getMessage());
             } catch (Exception e) {
-                return finish(item,"OCR_FAILED","Chưa trích xuất được PDF; kiểm tra dịch vụ OCR, mật khẩu hoặc giới hạn trang và thử lại");
+                var empty = new com.fsa.expense.dto.AiExtractionDto();
+                empty.setExtractionMethod("MANUAL_ENTRY");
+                empty.setNotes("Chưa trích xuất được PDF; kiểm tra dịch vụ OCR, mật khẩu hoặc giới hạn trang và thử lại.");
+                try {
+                    item.setRawExtraction(json.writeValueAsString(empty));
+                    item.setDraftJson(item.getRawExtraction());
+                } catch (Exception ignored) {}
+                return finish(item, "OCR_FAILED", "Chưa trích xuất được PDF; kiểm tra dịch vụ OCR, mật khẩu hoặc giới hạn trang và thử lại");
             }
         }
         Invoice invoice;
@@ -108,8 +148,22 @@ public class IntakeProcessor {
                 && !aliases.existsByTenantIdAndTaxCode(tenant.getId(),invoice.getBuyerTaxCode()))
             return finish(item,"REJECTED_ROUTING","MST người mua không thuộc doanh nghiệp hoặc chi nhánh phụ thuộc");
         var duplicate = findDuplicate(invoice.getTaxCode(), invoice.getInvoiceTemplate(), invoice.getInvoiceSeries(), invoice.getInvoiceNumber());
+        if (duplicate.isEmpty()) {
+            var similar = invoices.findSimilarInvoices(invoice, null);
+            if (!similar.isEmpty()) {
+                duplicate = java.util.Optional.of(similar.get(0).candidate());
+            }
+        }
         if (duplicate.isPresent()) {
-            item.setInvoiceId(duplicate.get().getId());
+            Invoice existing = duplicate.get();
+            if (existing.getLineItems().isEmpty() && !invoice.getLineItems().isEmpty()) {
+                for (com.fsa.expense.entity.InvoiceLineItem li : invoice.getLineItems()) {
+                    li.setInvoice(existing);
+                    existing.getLineItems().add(li);
+                }
+                invoices.saveAndFlush(existing);
+            }
+            item.setInvoiceId(existing.getId());
             return finish(item, "DUPLICATE_IDENTITY", "Trùng lặp: MST người bán, ký hiệu và số hóa đơn đã tồn tại; không tạo mới, không tính tiền lần hai");
         }
         if(emailSource && !quota.consume(tenant.getId()))return finish(item,"QUOTA_EXCEEDED","Vượt hạn mức hóa đơn email trong tháng; bản gốc được giữ để xử lý lại");
@@ -139,14 +193,24 @@ public class IntakeProcessor {
         IntakeItem item=items.findByIdAndTenantId(id,tenant.getId()).orElseThrow(() -> AuthService.error(404,"Không tìm thấy hồ sơ PDF"));
         if (!"PDF".equals(item.getDocumentType())) throw AuthService.error(409,"Tài liệu không phải PDF");
         if (confirm && item.getInvoiceId()!=null) return item;
-        if (!"OCR_REVIEW".equals(item.getState())) throw AuthService.error(409,"Hồ sơ không còn ở trạng thái chờ xác nhận");
+        if (!"OCR_REVIEW".equals(item.getState()) && !"OCR_FAILED".equals(item.getState())) throw AuthService.error(409,"Hồ sơ không còn ở trạng thái chờ xác nhận");
         if (item.getVersion()!=version) throw AuthService.error(409,"Dữ liệu đã thay đổi; mở lại hồ sơ trước khi lưu");
         try {
             // Engine metadata cannot be overwritten by the editable draft.
-            var original=json.readValue(item.getRawExtraction(),com.fsa.expense.dto.AiExtractionDto.class);
-            draft.setExtractionMethod(original.getExtractionMethod());
+            if (item.getRawExtraction() != null) {
+                var original=json.readValue(item.getRawExtraction(),com.fsa.expense.dto.AiExtractionDto.class);
+                draft.setExtractionMethod(original.getExtractionMethod());
+            } else {
+                draft.setExtractionMethod("MANUAL_ENTRY");
+                item.setRawExtraction(json.writeValueAsString(draft));
+            }
             item.setDraftJson(json.writeValueAsString(draft));
-            if (!confirm) { item.setUpdatedAt(Instant.now()); return items.saveAndFlush(item); }
+            if (!confirm) {
+                item.setState("OCR_REVIEW");
+                item.setMessage("Bản nháp PDF đã được lưu; đối chiếu và xác nhận để tạo hóa đơn.");
+                item.setUpdatedAt(Instant.now());
+                return items.saveAndFlush(item);
+            }
             Invoice invoice=pdfMapper.invoice(draft);
             invoice.setRawAiResponse(item.getRawExtraction());
             item.setConfirmedBy(TenantContext.username()); item.setConfirmedAt(Instant.now()); item.setConfirmedSnapshot(item.getDraftJson());

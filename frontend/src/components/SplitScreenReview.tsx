@@ -166,12 +166,19 @@ export const SplitScreenReview: React.FC<SplitScreenReviewProps> = ({
 
   // Compute VAT rate display string
   const getVatRateDisplay = (): string => {
-    if (lineItems.length > 0 && lineItems[0].vatRate) {
-      return lineItems[0].vatRate;
+    if (lineItems.length > 0) {
+      const rates = Array.from(new Set(lineItems.map(i => (i.vatRate || '').trim()).filter(Boolean)));
+      if (rates.length === 1) return rates[0];
+      if (rates.length > 1) return `Hỗn hợp (${rates.join(', ')})`;
     }
     if (subtotalAmount > 0 && vatAmount > 0) {
-      const pct = Math.round((vatAmount / subtotalAmount) * 100);
-      return `${pct} %`;
+      const ratio = vatAmount / subtotalAmount;
+      if (Math.abs(ratio - 0.10) < 0.005) return '10 %';
+      if (Math.abs(ratio - 0.08) < 0.005) return '8 %';
+      if (Math.abs(ratio - 0.05) < 0.005) return '5 %';
+      if (ratio === 0) return '0 % (KCT)';
+      const pct = Math.round(ratio * 100);
+      return `Hỗn hợp (~${pct}%)`;
     }
     return '0 %';
   };

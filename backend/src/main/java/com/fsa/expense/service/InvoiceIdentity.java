@@ -22,6 +22,8 @@ public final class InvoiceIdentity {
         String prefix = normalize(template).replaceAll("[^A-Z0-9]", "");
         if (prefix.matches("[0-9]{1,2}") && symbol.startsWith(prefix) && symbol.length() > prefix.length()) {
             symbol = symbol.substring(prefix.length());
+        } else if (symbol.matches("^[1-6][A-Z].*") && symbol.length() >= 6) {
+            symbol = symbol.substring(1);
         }
         if (no.matches("[0-9]+")) no = no.replaceFirst("^0+(?!$)", "");
         if (tax.isEmpty() || symbol.isEmpty() || no.isEmpty()) return null;
